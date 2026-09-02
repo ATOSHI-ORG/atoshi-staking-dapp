@@ -1,6 +1,0 @@
-{
-  "name": "Atoshi 质押",
-  "description": "Atoshi 链官方质押 DApp，支持 ATOS 质押、ATOX 挖矿奖励结算、验证人委托管理及链上自动兑换追踪。",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
