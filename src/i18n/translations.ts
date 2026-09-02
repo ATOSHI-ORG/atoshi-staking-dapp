@@ -12,6 +12,12 @@ export const translations = {
     refreshSuccess: 'Data refreshed',
     refreshFailed: 'Failed to refresh data',
     loadingChainData: 'Fetching Atoshi on-chain staking status...',
+    walletConnect: 'Connect',
+    walletConnecting: 'Connecting…',
+    walletNoProvider: 'No wallet detected. Open this page inside the Atoshi wallet to stake.',
+    walletConnectHint: 'Browsing is read-only. Connect a wallet to stake, unstake or claim.',
+    walletWrongChain: 'Your wallet is on a different network. Switch to Atoshi to see your real balances.',
+    walletSwitchChain: 'Switch',
     
     // Bottom Nav
     navOverview: 'Overview',
@@ -66,7 +72,7 @@ export const translations = {
     activeStatus: 'Active',
     jailedStatus: 'Jailed',
     commissionLabel: 'Commission',
-    estAprLabel: 'Est. ATOX APR',
+    estAprLabel: 'Est. yearly yield',
     btnStakeMore: 'Stake',
     btnUndelegate: 'Undelegate',
     btnRedelegate: 'Redelegate',
@@ -333,6 +339,12 @@ export const translations = {
     refreshSuccess: '数据已刷新',
     refreshFailed: '数据刷新失败',
     loadingChainData: '正在读取 Atoshi 链上质押状态...',
+    walletConnect: '连接钱包',
+    walletConnecting: '连接中…',
+    walletNoProvider: '当前环境没有检测到钱包。请在 Atoshi 钱包内打开本页面进行质押。',
+    walletConnectHint: '浏览无需连接。质押、解质押、领取奖励需要签名，请先连接钱包。',
+    walletWrongChain: '钱包当前不在 Atoshi 网络，余额显示的不是本链数据。',
+    walletSwitchChain: '切换',
 
     // Bottom Nav
     navOverview: '概览',
@@ -387,7 +399,7 @@ export const translations = {
     activeStatus: '活跃',
     jailedStatus: '已监禁',
     commissionLabel: '佣金',
-    estAprLabel: '预期 ATOX 年化',
+    estAprLabel: '预计年产出',
     btnStakeMore: '追加',
     btnUndelegate: '解质押',
     btnRedelegate: '转委托',

@@ -381,7 +381,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                           <div className="text-[11px] text-gray-400 mt-0.5 flex items-center gap-2">
                             <span>{t('commissionLabel')}: <strong className="text-gray-700 font-mono">{formatCommission(item.commission_rate)}</strong></span>
                             <span>•</span>
-                            <span>{t('estAprLabel')}: <strong className="text-blue-600 font-mono">{item.estimated_apr_atox}%</strong></span>
+                            <span>{t('estAprLabel')}: <strong className="text-blue-600 font-mono">{item.estimated_apr_atox.toFixed(2)}</strong><span className="text-[10px] text-gray-500"> ATOX/ATOS</span></span>
                           </div>
                         </div>
                       </div>

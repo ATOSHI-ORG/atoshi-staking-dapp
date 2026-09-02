@@ -199,7 +199,7 @@ export const RedelegateModal: React.FC<RedelegateModalProps> = ({
                     .filter((v) => v.operator_address !== srcValoper)
                     .map((v) => (
                       <option key={v.operator_address} value={v.operator_address} disabled={v.jailed}>
-                        {v.moniker} {v.jailed ? `(${t('jailedStatus')})` : `(${t('commissionLabel')} ${formatCommission(v.commission_rate)} | ${t('estAprLabel')} ${v.estimated_apr_atox}%)`}
+                        {v.moniker} {v.jailed ? `(${t('jailedStatus')})` : `(${t('commissionLabel')} ${formatCommission(v.commission_rate)} | ${t('estAprLabel')} ${v.estimated_apr_atox.toFixed(2)} ATOX/ATOS)`}
                       </option>
                     ))}
                 </select>

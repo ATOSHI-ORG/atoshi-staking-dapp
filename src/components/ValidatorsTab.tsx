@@ -309,7 +309,7 @@ export const ValidatorsTab: React.FC<ValidatorsTabProps> = ({
                     <div className="text-right">
                       <div className="text-[10px] text-gray-400">{t('estAprLabel')}</div>
                       <div className="font-mono font-bold text-[14px] text-blue-600">
-                        {val.estimated_apr_atox}% <span className="text-[10px] font-normal text-gray-500">ATOX</span>
+                        {val.estimated_apr_atox.toFixed(2)} <span className="text-[10px] font-normal text-gray-500">ATOX/ATOS</span>
                       </div>
                     </div>
                   </div>

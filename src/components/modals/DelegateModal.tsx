@@ -101,7 +101,7 @@ export const DelegateModal: React.FC<DelegateModalProps> = ({
   };
 
   const estimatedRewardAtoxPerYear = selectedValidator
-    ? ((parseFloat(amountInput || '0') * selectedValidator.estimated_apr_atox) / 100).toFixed(4)
+    ? (parseFloat(amountInput || '0') * selectedValidator.estimated_apr_atox).toFixed(4)
     : '0.0000';
 
   return (
@@ -158,7 +158,7 @@ export const DelegateModal: React.FC<DelegateModalProps> = ({
                 >
                   {allValidators.map((v) => (
                     <option key={v.operator_address} value={v.operator_address} disabled={v.jailed}>
-                      {v.moniker} {v.jailed ? `(${t('jailedStatus')})` : `(${t('commissionLabel')} ${formatCommission(v.commission_rate)} | ${t('estAprLabel')} ${v.estimated_apr_atox}%)`}
+                      {v.moniker} {v.jailed ? `(${t('jailedStatus')})` : `(${t('commissionLabel')} ${formatCommission(v.commission_rate)} | ${t('estAprLabel')} ${v.estimated_apr_atox.toFixed(2)} ATOX/ATOS)`}
                     </option>
                   ))}
                 </select>
@@ -183,7 +183,7 @@ export const DelegateModal: React.FC<DelegateModalProps> = ({
                   <div className="text-right">
                     <div className="text-[11px] text-gray-400">{t('estAprLabel')}</div>
                     <div className="text-[13px] font-bold text-blue-600 font-mono">
-                      {selectedValidator.estimated_apr_atox}%
+                      {selectedValidator.estimated_apr_atox.toFixed(2)} ATOX/ATOS
                     </div>
                   </div>
                 </div>

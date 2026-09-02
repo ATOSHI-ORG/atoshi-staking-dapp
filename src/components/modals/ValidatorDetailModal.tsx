@@ -80,7 +80,7 @@ export const ValidatorDetailModal: React.FC<ValidatorDetailModalProps> = ({
             <div className="text-right">
               <span className="text-[11px] text-gray-400">{t('estAprLabel')}</span>
               <div className="font-mono font-bold text-blue-600 text-[15px]">
-                {validator.estimated_apr_atox}% <span className="text-[10px] text-gray-500 font-normal">ATOX</span>
+                {validator.estimated_apr_atox.toFixed(2)} <span className="text-[10px] text-gray-500 font-normal">ATOX/ATOS</span>
               </div>
             </div>
           </div>

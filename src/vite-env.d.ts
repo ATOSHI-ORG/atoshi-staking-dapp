@@ -23,8 +23,24 @@ interface ImportMetaEnv {
   /** 奖励币最小单位，默认 aatox */
   readonly VITE_ATOX_DENOM?: string;
 
-  /** 出块间隔（秒），用于把每块 ATOX 产出换算成年化。默认 5 */
+  /** 出块间隔（秒），用于把每块 ATOX 产出换算成年产出。默认 5 */
   readonly VITE_BLOCK_SECONDS?: string;
+
+  /**
+   * EVM 链 id，默认 88288（测试网）。
+   * 写操作走 EVM 预编译，钱包必须连在这条链上，wagmi 会拿它做校验。
+   */
+  readonly VITE_CHAIN_ID?: string;
+
+  /**
+   * EVM JSON-RPC 地址，默认 https://rpc-testnet.atoshi.org。
+   * 用来等交易回执（waitForTransactionReceipt）。
+   * 注意跟 VITE_REST_URL 不是一回事：这个是 8545，那个是 1317。
+   */
+  readonly VITE_EVM_RPC_URL?: string;
+
+  /** 区块浏览器地址，用于交易成功后的跳转链接 */
+  readonly VITE_EXPLORER_URL?: string;
 }
 
 interface ImportMeta {

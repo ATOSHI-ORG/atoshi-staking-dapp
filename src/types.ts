@@ -20,7 +20,11 @@ export interface Validator {
   uptime_percent: number; // e.g. 99.9
   missed_blocks_counter: number; // missed in last 100 blocks
   signed_blocks_window: number; // 100
-  estimated_apr_atox: number; // in % (paid in ATOX)
+  /**
+   * 每质押 1 ATOS 每年产出多少个 ATOX。单位是 ATOX/ATOS，**不是百分比** ——
+   * 奖励币和质押币不是同一个币，比值写不成百分号。展示时带上 "ATOX/ATOS" 单位。
+   */
+  estimated_apr_atox: number;
   in_active_set: boolean; // Top 100
   rank: number;
 }

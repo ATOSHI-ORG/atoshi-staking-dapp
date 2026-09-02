@@ -6,6 +6,7 @@ import {
   RefreshCw,
   Plus
 } from 'lucide-react';
+import { WalletBar } from './components/WalletBar';
 import { WalletHeader } from './components/WalletHeader';
 import { OverviewTab } from './components/OverviewTab';
 import { ValidatorsTab } from './components/ValidatorsTab';
@@ -22,7 +23,7 @@ import { ToastContainer, ToastMessage } from './components/Toast';
 import { useLanguage } from './i18n/LanguageContext';
 import { 
   StakingApi, 
-  USER_ADDRESS, 
+  USER_ADDRESS as FALLBACK_ADDRESS, 
   DEFAULT_STAKING_PARAMS 
 } from './services/stakingApi';
 import { 
@@ -36,16 +37,32 @@ import {
   StakingTxHistory 
 } from './types';
 import { formatCoinAmount } from './utils/format';
+import { useWallet } from './wallet/useWallet';
 
 export default function App() {
   const { t } = useLanguage();
+
+  // 钱包给的是 0x 地址，但 Cosmos REST 的查询路径只认 atoshi1…，
+  // useWallet 里已经转好了。没连钱包时退回 FALLBACK_ADDRESS（mock 模式的假地址，
+  // 或 chain 模式的 VITE_DEMO_ADDRESS），让页面有东西可渲染。
+  const {
+    bech32Address,
+    isConnected,
+    isConnecting,
+    wrongChain,
+    hasProvider,
+    connect: connectWallet,
+    switchToAtoshi,
+  } = useWallet();
+  const userAddress = bech32Address || FALLBACK_ADDRESS;
+
   const [activeTab, setActiveTab] = useState<'overview' | 'validators' | 'unbonding'>('overview');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   // Core chain state
   const [assets, setAssets] = useState<AccountAssets>({
-    address: USER_ADDRESS,
+    address: userAddress,
     available_atos: '0',
     staked_atos: '0',
     unbonding_atos: '0',
@@ -55,7 +72,7 @@ export default function App() {
   const [delegations, setDelegations] = useState<DelegationItem[]>([]);
   const [unbondingEntries, setUnbondingEntries] = useState<UnbondingEntry[]>([]);
   const [atoxAccount, setAtoxAccount] = useState<AtoxAccountData>({
-    address: USER_ADDRESS,
+    address: userAddress,
     atox_balance: '0',
     pending_atos: '0',
     cumulative_converted_atos: '0',
@@ -70,7 +87,7 @@ export default function App() {
     next_tier_progress_percent: 0,
   });
   const [energyData, setEnergyData] = useState<EnergyAccountData>({
-    address: USER_ADDRESS,
+    address: userAddress,
     energy_balance: 0,
     energy_max: 10000,
     qualifies_for_energy: false,
@@ -132,12 +149,12 @@ export default function App() {
         hist,
       ] = await Promise.all([
         StakingApi.getValidators(),
-        StakingApi.getDelegations(USER_ADDRESS),
-        StakingApi.getUnbonding(USER_ADDRESS),
-        StakingApi.getAtoxAccount(USER_ADDRESS),
+        StakingApi.getDelegations(userAddress),
+        StakingApi.getUnbonding(userAddress),
+        StakingApi.getAtoxAccount(userAddress),
         StakingApi.getAtoxGlobal(),
-        StakingApi.getEnergyAccount(USER_ADDRESS),
-        StakingApi.getAccountAssets(USER_ADDRESS),
+        StakingApi.getEnergyAccount(userAddress),
+        StakingApi.getAccountAssets(userAddress),
         StakingApi.getHistory(),
       ]);
 
@@ -156,7 +173,7 @@ export default function App() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [t]);
+  }, [t, userAddress]);
 
   useEffect(() => {
     loadData();
@@ -165,7 +182,7 @@ export default function App() {
   // Handlers for core on-chain operations
   const handleConfirmDelegate = async (valoper: string, rawAmount: string) => {
     const res = await StakingApi.delegate({
-      delegator: USER_ADDRESS,
+      delegator: userAddress,
       validator: valoper,
       amount: rawAmount,
     });
@@ -179,7 +196,7 @@ export default function App() {
 
   const handleConfirmUndelegate = async (valoper: string, rawAmount: string) => {
     const res = await StakingApi.undelegate({
-      delegator: USER_ADDRESS,
+      delegator: userAddress,
       validator: valoper,
       amount: rawAmount,
     });
@@ -193,7 +210,7 @@ export default function App() {
 
   const handleConfirmRedelegate = async (srcVal: string, dstVal: string, rawAmount: string) => {
     const res = await StakingApi.redelegate({
-      delegator: USER_ADDRESS,
+      delegator: userAddress,
       src_validator: srcVal,
       dst_validator: dstVal,
       amount: rawAmount,
@@ -208,7 +225,7 @@ export default function App() {
 
   const handleConfirmWithdrawRewards = async (validatorValoper?: string) => {
     const res = await StakingApi.withdrawRewards({
-      delegator: USER_ADDRESS,
+      delegator: userAddress,
       validator: validatorValoper,
     });
     await loadData();
@@ -227,12 +244,21 @@ export default function App() {
       <div className="w-full max-w-[430px] min-h-screen bg-[#F8F9FB] flex flex-col shadow-lg relative border-x border-[#ECEFF3]">
         {/* Top Wallet WebView Header */}
         <WalletHeader
-          address={USER_ADDRESS}
+          address={userAddress}
           energyBalance={energyData.energy_balance}
           qualifiesForEnergy={energyData.qualifies_for_energy}
           onRefresh={() => loadData(true)}
           isLoading={isRefreshing}
           onOpenEnergyInfo={() => setIsEnergyInfoOpen(true)}
+        />
+
+        <WalletBar
+          isConnected={isConnected}
+          isConnecting={isConnecting}
+          wrongChain={wrongChain}
+          hasProvider={hasProvider}
+          onConnect={connectWallet}
+          onSwitchChain={switchToAtoshi}
         />
 
         {/* Tab Content */}

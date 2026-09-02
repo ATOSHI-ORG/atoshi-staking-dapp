@@ -1,13 +1,23 @@
 /**
- * StakingApi 的真链实现：从 Cosmos REST 读，字段映射到 UI 的类型。
+ * StakingApi 的真链实现。读和写走两条不同的路：
  *
- * 只读部分是完整的。写操作（delegate / undelegate / redelegate / withdraw）
- * 需要签名，而这个页面是嵌在 Atoshi 钱包里的 WebView —— 签名走钱包注入的
- * bridge，不走 REST。所以那四个方法在这里是明确的接入点，不是假实现：
- * 没接上钱包时抛错并说清缺什么，而不是静默返回一个假的 tx_hash。
+ *   读 → Cosmos REST（app.toml 的 [api]，1317）
+ *   写 → EVM 预编译（0x…0800 staking / 0x…0801 distribution），钱包签名
+ *
+ * 为什么不统一成一条：
+ *  - 写不能走 REST。质押是 Cosmos 消息（MsgDelegate），以太坊钱包签不了。
+ *    但链上开了这两个预编译，于是质押可以变成一笔普通 EVM 交易，
+ *    MetaMask / OKX / 钱包 WebView 注入的 provider 全都能签。这是这个 DApp
+ *    能直接用 wagmi、不必自己写钱包 bridge 的前提。
+ *  - 读不走预编译。预编译的 view 方法一次只能查一个验证人，而且拿不到
+ *    在线率、解质押完成时间这些只有 REST 才给的字段。列表页用 REST 便宜得多。
  *
  * 链上参数（21 天解绑、7 笔并发上限、5% 最低佣金、1 亿自质押门槛）全部从
  * REST 读，不写死 —— 治理改了参数，页面要跟着变。
+ *
+ * 所有 REST 路径和返回字段都逐条对过真链（atoshi_88288-1），不是按字段名猜的。
+ * 改这个文件时请照样对一遍：猜错的字段读出来是 undefined，UI 静默显示 0，
+ * 比报错难查得多。
  */
 
 import {
@@ -34,33 +44,60 @@ import {
   restGetAllPages,
 } from './chainRest';
 
-/* ────────────────────────────── 钱包签名接入点 ────────────────────────────── */
+/* ────────────────────────────── 钱包写操作 ────────────────────────────── */
 
 /**
- * 钱包注入的签名桥。页面跑在 Atoshi 钱包的 WebView 里时由宿主注入。
- * 形状按 Cosmos 的 Msg 走，具体字段与钱包端对齐后可能要调整。
+ * 读走 Cosmos REST，写走 EVM 预编译。
+ *
+ * 为什么不是两边都用一种：
+ *  - 写：质押是 Cosmos 消息，以太坊钱包签不了；但链上开了 staking/distribution
+ *    预编译，于是可以变成一笔普通 EVM 交易，MetaMask/OKX/钱包内注入的
+ *    provider 全都能签。这是不用自己写钱包 bridge 的前提。
+ *  - 读：预编译也有 view 方法，但一次只能查一个验证人，而且拿不到 REST 才有的
+ *    在线率、解质押完成时间这些字段。列表页用 REST 一次拿全量便宜得多。
+ *
+ * 用 wagmi 的命令式 actions（不是 hooks），这样 StakingApi 保持普通对象的形状，
+ * 上层 UI 一行都不用改。
  */
-export interface WalletBridge {
-  /** 当前账户的 bech32 地址 */
-  getAddress(): Promise<string>;
-  /** 签名并广播一组 Msg，返回 tx hash */
-  signAndBroadcast(msgs: unknown[], memo?: string): Promise<{ tx_hash: string }>;
+
+import { getAccount, waitForTransactionReceipt, writeContract } from 'wagmi/actions';
+
+import { atoshi, toBech32, toHex } from '../wallet/chain';
+import { wagmiConfig } from '../wallet/config';
+import {
+  DISTRIBUTION_PRECOMPILE,
+  GAS_LIMITS,
+  STAKING_PRECOMPILE,
+  distributionAbi,
+  stakingAbi,
+} from '../wallet/precompiles';
+
+/** 当前已连接的 0x 地址；没连钱包就抛出能看懂的错误。 */
+function requireAccount(): `0x${string}` {
+  const { address, isConnected } = getAccount(wagmiConfig);
+  if (!isConnected || !address) {
+    throw new ChainRestError('请先连接钱包。质押类操作需要签名。');
+  }
+  return address;
 }
 
-declare global {
-  interface Window {
-    atoshiWallet?: WalletBridge;
+/**
+ * 广播并等上链。
+ *
+ * 必须等 receipt 而不是拿到 hash 就返回：预编译调用失败时交易照样上链，
+ * 只是 status = 'reverted'。不检查的话 UI 会显示「质押成功」而链上什么都没发生。
+ *
+ * 参数收成一个闭包而不是抽出参数类型：`Parameters<typeof writeContract>[1]`
+ * 会把泛型塌成约束上界，既丢掉 ABI 的类型检查，又把本该可选的 chain/account
+ * 变成必填。让 writeContract 在调用处直接推断才有意义。
+ */
+async function sendTx(send: () => Promise<`0x${string}`>): Promise<string> {
+  const hash = await send();
+  const receipt = await waitForTransactionReceipt(wagmiConfig, { hash });
+  if (receipt.status !== 'success') {
+    throw new ChainRestError(`交易已上链但执行失败（reverted），tx: ${hash}`);
   }
-}
-
-function requireWallet(): WalletBridge {
-  const w = typeof window !== 'undefined' ? window.atoshiWallet : undefined;
-  if (!w) {
-    throw new ChainRestError(
-      '未检测到钱包。质押类交易需要签名，页面必须运行在 Atoshi 钱包内（由宿主注入 window.atoshiWallet）。',
-    );
-  }
-  return w;
+  return hash;
 }
 
 /* ────────────────────────────── 只读查询 ────────────────────────────── */
@@ -95,13 +132,22 @@ async function getParams(): Promise<StakingParams> {
 }
 
 /**
- * 出块奖励是 ATOX，所以年化必须按 ATOX 的发行速率算，不能套用「通胀÷质押率」
- * 那套 ATOS 的公式 —— 本链 inflation 是关掉的，那个公式会算出 0。
+ * 收益率：每质押 1 ATOS，一年能拿到多少个 ATOX。
  *
- * 年化 = 每年 ATOX 产出 × (1 - 佣金) × (该验证人质押 / 全网质押) / 该验证人质押
- *      = 每年 ATOX 产出 × (1 - 佣金) / 全网质押
- * 也就是说委托人的 ATOX 年化只取决于佣金率和全网总质押，与选哪个验证人无关
- * （除了佣金差异）。这跟 ATOS 计价的年化不是一回事，UI 上标注了单位是 ATOX。
+ * 单位是 ATOX/ATOS，**不是百分比**。这一点很容易写错，说清楚原因：
+ * 出块奖励是 ATOX，质押的是 ATOS，两个不同的币，比值没法写成百分号 ——
+ * 百分比要求分子分母同单位。也换不成百分比：ATOX 没有市场价（它是靠 tier
+ * 释放按兑换池比例结算成 ATOS 的，比例随池子变），oracle 只喂 ATOS 的价。
+ *
+ * 实测（块高 2400）这个比值是 78 ATOX/ATOS，写成 "7031%" 会让用户以为
+ * 一年翻 70 倍。我第一版就是这么错的。
+ *
+ * 也不能套用「通胀率 ÷ 质押率」那套 ATOS 的公式 —— 本链 inflation 是关掉的，
+ * 那个公式会算出 0。
+ *
+ * 比值 = 每年 ATOX 产出 × (1-佣金) × (该验证人质押/全网质押) / 该验证人质押
+ *      = 每年 ATOX 产出 × (1-佣金) / 全网质押
+ * 约掉之后与选哪个验证人无关，只取决于佣金率和全网总质押。
  */
 function estimateAprAtox(
   blockRewardAatox: bigint,
@@ -115,7 +161,8 @@ function estimateAprAtox(
   // 两者都是 18 位精度，比值直接可用
   const gross = Number(yearlyAtox) / Number(totalBondedLiao);
   const net = gross * (1 - Number(commissionRate || '0'));
-  return Number.isFinite(net) ? net * 100 : 0;
+  // 不乘 100 —— 返回的是 ATOX/ATOS 的比值本身，不是百分比
+  return Number.isFinite(net) ? net : 0;
 }
 
 async function getValidators(query?: {
@@ -129,12 +176,16 @@ async function getValidators(query?: {
     // 而 REST 的 status 过滤一次只能给一种
     restGetAllPages<any>('/cosmos/staking/v1beta1/validators', (p) => p.validators ?? []),
     restGet<any>('/cosmos/staking/v1beta1/pool'),
-    restGet<any>('/atoshi/tokenomics/v1/params'),
+    // block_reward 给的是「当前」每块产出，已经算进减半。
+    // 不能用 tokenomics params 里的 initial_block_reward —— 那是创世值，
+    // 每过一个 halving_interval_blocks 就翻倍偏高（实测块高 2361 时链上
+    // current_reward 是 4954.75 ATOX，而 initial 是 19819，差 4 倍）。
+    restGet<any>('/atoshi/tokenomics/v1/block_reward'),
     restGet<any>('/cosmos/staking/v1beta1/params'),
   ]);
 
   const totalBonded = BigInt(poolRes?.pool?.bonded_tokens ?? '0');
-  const blockReward = BigInt(tokenomicsRes?.params?.initial_block_reward ?? '0');
+  const blockReward = BigInt(tokenomicsRes?.current_reward ?? '0');
   const blockSeconds = Number(import.meta.env.VITE_BLOCK_SECONDS ?? 5);
   const maxValidators = Number(stakingParamsRes?.params?.max_validators ?? 100);
   const signedWindow = 100; // slashing.signed_blocks_window，下面再校准
@@ -327,11 +378,23 @@ async function getAtoxAccount(address: string): Promise<AtoxAccountData> {
       .catch(() => ({ balance: { amount: '0' } })),
   ]);
 
+  // 实测返回形状（块高 2400，atoshi_88288-1）：
+  //   { account: { address, index, pending, total_claimed },
+  //     atox_balance, unsettled, claimable }
+  // 逐条对过链上的返回，不要凭字段名猜 —— 我第一版写的 acct.pending 和
+  // acct.cumulative_paid_out 都读不到东西，永远显示 0。
+  const a = acct?.account ?? {};
+
   return {
     address,
-    atox_balance: bal?.balance?.amount ?? '0',
-    pending_atos: acct?.pending ?? '0',
-    cumulative_converted_atos: acct?.cumulative_paid_out ?? '0',
+    // 模块自己给了 atox_balance，优先用它；bank 那条是兜底（模块查询失败时）
+    atox_balance: acct?.atox_balance ?? bal?.balance?.amount ?? '0',
+    // pending = 已结算待兑换的部分，unsettled = 还没结算进 index 的部分，
+    // 两者都是用户「拿得到但还没到账」的 ATOX，UI 上是一个数字，得加起来
+    pending_atos: (
+      BigInt(a.pending ?? '0') + BigInt(acct?.unsettled ?? '0')
+    ).toString(),
+    cumulative_converted_atos: a.total_claimed ?? '0',
   };
 }
 
@@ -339,20 +402,26 @@ async function getAtoxGlobal(): Promise<AtoxGlobalData> {
   const [global, params, release] = await Promise.all([
     restGet<any>('/atoshi/atox/v1/global_state').catch(() => ({})),
     restGet<any>('/atoshi/atox/v1/params').catch(() => ({})),
-    restGet<any>('/atoshi/tokenomics/v1/release_state').catch(() => ({})),
+    // 是 release_status，不是 release_state —— 后者链上没注册，REST 返回 501。
+    // 路径以 proto/atoshi/tokenomics/v1/query.proto 里的 google.api.http 为准。
+    restGet<any>('/atoshi/tokenomics/v1/release_status').catch(() => ({})),
   ]);
 
-  const gs = global?.global_state ?? global ?? {};
-  const rs = release?.release_state ?? release ?? {};
+  // 两个自定义模块的返回都把结构体包在 "state" 里，不是 "global_state"/"release_state"
+  const gs = global?.state ?? {};
+  const rs = release?.state ?? {};
   const supplyCap = params?.params?.supply_cap ?? '0';
 
-  const released = BigInt(gs.total_released_to_pool ?? '0');
+  // 已发行的 ATOX 实际流通量，模块直接给了；不要拿 supply_cap 当总量 ——
+  // cap 是 1 万亿 ATOX 的上限，实际流通只有 3 千多万，差 5 个数量级，
+  // 用 cap 算进度会永远显示 0%。
+  const released = BigInt(global?.atox_supply ?? gs.total_released_to_pool ?? '0');
   const cap = BigInt(supplyCap || '0');
 
   return {
     global_index: gs.global_index ?? '0',
     total_released_to_pool: gs.total_released_to_pool ?? '0',
-    atox_total_supply: supplyCap,
+    atox_total_supply: global?.atox_supply ?? '0',
     current_tier: Number(rs.current_tier ?? 0),
     total_tiers: 10, // Tier 表是 10 档（+10% 到 +100%）
     tier_name: `T${rs.current_tier ?? 0}`,
@@ -368,8 +437,18 @@ async function getEnergyAccount(address: string): Promise<EnergyAccountData> {
     getAccountAssets(address),
   ]);
 
-  const ea = energyAcct?.account ?? energyAcct ?? {};
+  // 实测返回形状：
+  //   { settled: { tx_energy_accrued, deploy_energy_accrued, last_balance_snapshot, ... },
+  //     tx_energy_capacity, deploy_energy_capacity }
+  // 没有 account 这一层，也没有叫 energy 的字段。
+  const ea = energyAcct?.settled ?? {};
   const ep = energyParams?.params ?? {};
+
+  // 上限用模块算好的 tx_energy_capacity，不要拿 tx_energy_per_threshold 当上限 ——
+  // 后者是「每满一个门槛给多少」（50,000），而上限是它乘以门槛个数
+  // （2 亿 ATOS / 3 万 = 6666 个门槛 → 333,300,000）。差 6000 多倍。
+  const capacity = Number(energyAcct?.tx_energy_capacity ?? 0);
+  const accrued = Number(ea.tx_energy_accrued ?? 0);
 
   const thresholdRaw = BigInt(ep.tx_energy_holding_threshold ?? '0');
   // 质押中的 ATOS 也算持仓 —— 币还是用户的。这是本链和多数链不同的一点，
@@ -378,13 +457,15 @@ async function getEnergyAccount(address: string): Promise<EnergyAccountData> {
 
   return {
     address,
-    energy_balance: Number(ea.energy ?? 0),
-    energy_max: Number(ep.tx_energy_per_threshold ?? 0),
+    energy_balance: accrued,
+    energy_max: capacity,
     qualifies_for_energy: thresholdRaw > 0n && total >= thresholdRaw,
     available_atos: assets.available_atos,
     staked_atos: assets.staked_atos,
     total_calculated_atos: total.toString(),
-    free_gas_tx_remaining: Number(ea.energy ?? 0) > 0 ? 1 : 0,
+    // 能量的单位就是 gas。一笔普通转账约 100k gas，用它换算成「还能免费发几笔」。
+    // 是个量级估计，不是保证 —— 预编译调用要 50 万以上，用户实际能发的更少。
+    free_gas_tx_remaining: Math.floor(accrued / 100_000),
     energy_threshold_atos: Number(thresholdRaw / DECIMALS_18),
   };
 }
@@ -440,24 +521,40 @@ async function getHistory(): Promise<StakingTxHistory[]> {
   return [];
 }
 
-/* ────────────────────────────── 写操作（需要钱包签名） ────────────────────────────── */
+/* ────────────────────────────── 写操作（走 EVM 预编译） ────────────────────────────── */
+
+/**
+ * 传进来的 delegator 可能是 bech32（UI 从 REST 拿到的）也可能是 0x（钱包给的）。
+ * 预编译要 0x，而且必须是当前连接的那个账户 —— 让别人替你质押链上会拒绝。
+ */
+function delegatorArg(delegator: string): `0x${string}` {
+  const connected = requireAccount();
+  const want = toHex(delegator);
+  if (want.toLowerCase() !== connected.toLowerCase()) {
+    throw new ChainRestError(
+      `页面上的账户（${toBech32(delegator)}）和钱包当前账户不一致，请在钱包里切换后重试。`,
+    );
+  }
+  return connected;
+}
 
 async function delegate(params: {
   delegator: string;
   validator: string;
   amount: string;
 }): Promise<{ success: boolean; tx_hash: string; message?: string }> {
-  const wallet = requireWallet();
-  const { tx_hash } = await wallet.signAndBroadcast([
-    {
-      typeUrl: '/cosmos.staking.v1beta1.MsgDelegate',
-      value: {
-        delegatorAddress: params.delegator,
-        validatorAddress: params.validator,
-        amount: { denom: BOND_DENOM, amount: params.amount },
-      },
-    },
-  ]);
+  const account = delegatorArg(params.delegator);
+  const tx_hash = await sendTx(() =>
+    writeContract(wagmiConfig, {
+      account,
+      chain: atoshi,
+      address: STAKING_PRECOMPILE,
+      abi: stakingAbi,
+      functionName: 'delegate',
+      args: [account, params.validator, BigInt(params.amount)],
+      gas: GAS_LIMITS.delegate,
+    }),
+  );
   return { success: true, tx_hash };
 }
 
@@ -466,17 +563,18 @@ async function undelegate(params: {
   validator: string;
   amount: string;
 }): Promise<{ success: boolean; tx_hash: string; message?: string }> {
-  const wallet = requireWallet();
-  const { tx_hash } = await wallet.signAndBroadcast([
-    {
-      typeUrl: '/cosmos.staking.v1beta1.MsgUndelegate',
-      value: {
-        delegatorAddress: params.delegator,
-        validatorAddress: params.validator,
-        amount: { denom: BOND_DENOM, amount: params.amount },
-      },
-    },
-  ]);
+  const account = delegatorArg(params.delegator);
+  const tx_hash = await sendTx(() =>
+    writeContract(wagmiConfig, {
+      account,
+      chain: atoshi,
+      address: STAKING_PRECOMPILE,
+      abi: stakingAbi,
+      functionName: 'undelegate',
+      args: [account, params.validator, BigInt(params.amount)],
+      gas: GAS_LIMITS.undelegate,
+    }),
+  );
   return { success: true, tx_hash };
 }
 
@@ -486,18 +584,18 @@ async function redelegate(params: {
   dst_validator: string;
   amount: string;
 }): Promise<{ success: boolean; tx_hash: string; message?: string }> {
-  const wallet = requireWallet();
-  const { tx_hash } = await wallet.signAndBroadcast([
-    {
-      typeUrl: '/cosmos.staking.v1beta1.MsgBeginRedelegate',
-      value: {
-        delegatorAddress: params.delegator,
-        validatorSrcAddress: params.src_validator,
-        validatorDstAddress: params.dst_validator,
-        amount: { denom: BOND_DENOM, amount: params.amount },
-      },
-    },
-  ]);
+  const account = delegatorArg(params.delegator);
+  const tx_hash = await sendTx(() =>
+    writeContract(wagmiConfig, {
+      account,
+      chain: atoshi,
+      address: STAKING_PRECOMPILE,
+      abi: stakingAbi,
+      functionName: 'redelegate',
+      args: [account, params.src_validator, params.dst_validator, BigInt(params.amount)],
+      gas: GAS_LIMITS.redelegate,
+    }),
+  );
   return { success: true, tx_hash };
 }
 
@@ -505,10 +603,10 @@ async function withdrawRewards(params: {
   delegator: string;
   validator?: string;
 }): Promise<{ success: boolean; tx_hash: string; total_claimed_atox: string }> {
-  const wallet = requireWallet();
+  const account = delegatorArg(params.delegator);
 
-  // 不指定验证人就是「全部领取」，要为每个有委托的验证人各发一条 Msg ——
-  // 链上没有「一次领全部」的单条消息
+  // 广播前先记下待领金额。广播后再查会拿到 0（已经领完了），
+  // 而 UI 要用这个数字提示「领取了多少 ATOX」。
   const delegations = await getDelegations(params.delegator);
   const targets = params.validator
     ? [params.validator]
@@ -518,18 +616,40 @@ async function withdrawRewards(params: {
     return { success: false, tx_hash: '', total_claimed_atox: '0' };
   }
 
-  // 广播前先记下待领金额。广播后再查会拿到 0（已经领完了），
-  // 而 UI 要用这个数字提示「领取了多少 ATOX」。
   const claimed = delegations
     .filter((d) => targets.includes(d.validator_address))
     .reduce((sum, d) => sum + BigInt(d.pending_reward_atox), 0n);
 
-  const { tx_hash } = await wallet.signAndBroadcast(
-    targets.map((v) => ({
-      typeUrl: '/cosmos.distribution.v1beta1.MsgWithdrawDelegatorReward',
-      value: { delegatorAddress: params.delegator, validatorAddress: v },
-    })),
-  );
+  // 单个验证人用 withdrawDelegatorRewards；「全部领取」用 claimRewards ——
+  // 它在预编译内部遍历，一笔交易搞定，不用像 Cosmos 那样为每个验证人发一条消息。
+  const single = params.validator;
+  const tx_hash = single
+    ? await sendTx(() =>
+        writeContract(wagmiConfig, {
+          account,
+          chain: atoshi,
+          address: DISTRIBUTION_PRECOMPILE,
+          abi: distributionAbi,
+          functionName: 'withdrawDelegatorRewards',
+          args: [account, single],
+          gas: GAS_LIMITS.withdrawRewards,
+        }),
+      )
+    : await sendTx(() =>
+        writeContract(wagmiConfig, {
+          account,
+          chain: atoshi,
+          address: DISTRIBUTION_PRECOMPILE,
+          abi: distributionAbi,
+          functionName: 'claimRewards',
+          // maxRetrieve 给太小会漏领，所以按实际委托数再留一点余量
+          args: [account, Math.min(targets.length + 5, 0xffff)],
+          gas:
+            GAS_LIMITS.claimRewardsBase +
+            GAS_LIMITS.claimRewardsPerValidator * BigInt(targets.length),
+        }),
+      );
+
   return { success: true, tx_hash, total_claimed_atox: claimed.toString() };
 }
 

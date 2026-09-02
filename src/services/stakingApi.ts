@@ -60,4 +60,3 @@ export const USER_ADDRESS: string =
 export { DEFAULT_STAKING_PARAMS } from './stakingApiMock';
 
 export { ChainRestError } from './chainRest';
-export type { WalletBridge } from './stakingApiChain';
