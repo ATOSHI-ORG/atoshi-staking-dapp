@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, ShieldCheck, Clock, AlertTriangle, ArrowRight, Loader2, CheckCircle2, Zap } from 'lucide-react';
 import { Validator, EnergyAccountData } from '../../types';
-import { formatCoinAmount, parseHumanAmountToRaw, rawToNumber, formatCommission } from '../../utils/format';
+import { formatCoinAmount, parseHumanAmountToRaw, rawToNumber, formatCommission, valoperToHex } from '../../utils/format';
 import { useLanguage } from '../../i18n/LanguageContext';
 
 interface DelegateModalProps {
@@ -149,7 +149,7 @@ export const DelegateModal: React.FC<DelegateModalProps> = ({
                 </label>
                 <select
                   id="delegate-validator-select"
-                  value={selectedValidator?.operator_address || ''}
+                  value={selectedValidator ? valoperToHex(selectedValidator.operator_address) : ''}
                   onChange={(e) => {
                     const found = allValidators.find((v) => v.operator_address === e.target.value);
                     if (found) setSelectedValidator(found);

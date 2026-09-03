@@ -20,7 +20,8 @@ import { Validator } from '../types';
 import { 
   formatLargeAmount, 
   formatCommission, 
-  shortenAddress 
+  shortenAddress,
+  valoperToHex,
 } from '../utils/format';
 import { useLanguage } from '../i18n/LanguageContext';
 
@@ -59,6 +60,8 @@ export const ValidatorsTab: React.FC<ValidatorsTabProps> = ({
       return (
         v.moniker.toLowerCase().includes(q) ||
         v.operator_address.toLowerCase().includes(q) ||
+        // 列表里展示的是 0x 形式，用户会照着展示的内容搜
+        valoperToHex(v.operator_address).toLowerCase().includes(q) ||
         (v.identity && v.identity.toLowerCase().includes(q))
       );
     })
@@ -246,9 +249,9 @@ export const ValidatorsTab: React.FC<ValidatorsTabProps> = ({
       </div>
 
       {/* 4. Validator Cards List */}
-      <div className="space-y-3">
+      <div className="space-y-3 lg:grid lg:grid-cols-2 lg:items-start lg:gap-3 lg:space-y-0">
         {filteredList.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-[#E5E7EB] p-8 text-center text-gray-400 text-[13px]">
+          <div className="bg-white rounded-2xl border border-[#E5E7EB] p-8 text-center text-gray-400 text-[13px] lg:col-span-2">
             {t('noValidatorsMatched')}
           </div>
         ) : (
@@ -300,7 +303,7 @@ export const ValidatorsTab: React.FC<ValidatorsTabProps> = ({
                         </div>
 
                         <div className="text-[11px] text-gray-400 font-mono mt-0.5">
-                          {shortenAddress(val.operator_address, 8, 6)}
+                          {shortenAddress(valoperToHex(val.operator_address), 8, 6)}
                         </div>
                       </div>
                     </div>

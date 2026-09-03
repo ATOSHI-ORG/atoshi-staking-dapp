@@ -6,6 +6,7 @@ import {
   RefreshCw,
   Plus
 } from 'lucide-react';
+import { DesktopTabs } from './components/DesktopTabs';
 import { WalletBar } from './components/WalletBar';
 import { WalletHeader } from './components/WalletHeader';
 import { OverviewTab } from './components/OverviewTab';
@@ -240,8 +241,13 @@ export default function App() {
     <div className="min-h-screen bg-[#F6F8FA] flex justify-center text-[#1F2937]">
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
 
-      {/* Main Mobile App Frame (375-430px responsive mobile canvas) */}
-      <div className="w-full max-w-[430px] min-h-screen bg-[#F8F9FB] flex flex-col shadow-lg relative border-x border-[#ECEFF3]">
+      {/*
+        自适应外壳。
+        手机（默认）：430px 的竖屏画布，两侧描边模拟钱包 WebView 的观感。
+        桌面（lg 起）：加宽到 1080px，去掉描边和阴影 —— 那两样在宽屏上看起来
+        像个居中的手机壳，很别扭。内容分栏由各 Tab 自己的 lg:grid 负责。
+      */}
+      <div className="w-full max-w-[430px] min-h-screen bg-[#F8F9FB] flex flex-col shadow-lg relative border-x border-[#ECEFF3] lg:max-w-[1080px] lg:border-x-0 lg:shadow-none lg:bg-[#F6F8FA]">
         {/* Top Wallet WebView Header */}
         <WalletHeader
           address={userAddress}
@@ -261,8 +267,15 @@ export default function App() {
           onSwitchChain={switchToAtoshi}
         />
 
+        {/* 桌面端的横向导航，和底部导航互斥（那个是 lg:hidden） */}
+        <DesktopTabs
+          activeTab={activeTab}
+          onChange={setActiveTab}
+          unbondingCount={unbondingEntries.length}
+        />
+
         {/* Tab Content */}
-        <main className="flex-1 p-4 pb-20 overflow-y-auto">
+        <main className="flex-1 p-4 pb-20 overflow-y-auto lg:px-8 lg:pb-8">
           {isLoading ? (
             <div className="flex flex-col items-center justify-center py-24 space-y-3 text-gray-400">
               <RefreshCw className="w-8 h-8 animate-spin text-blue-600" />
@@ -330,7 +343,7 @@ export default function App() {
         {/* Bottom Tab Bar (White background, light gray divider, fixed 3-tab navigation) */}
         <nav 
           id="staking-bottom-nav"
-          className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-white border-t border-[#F0F2F5] px-2 py-1.5 flex items-center justify-around z-30 shadow-md"
+          className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-white border-t border-[#F0F2F5] px-2 py-1.5 flex items-center justify-around z-30 shadow-md lg:hidden"
         >
           {/* Tab 1: 概览 */}
           <button

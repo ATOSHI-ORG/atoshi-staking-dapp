@@ -4,6 +4,8 @@
  * 1 ATOX = 10^18 aatox
  */
 
+import { bech32ToHex } from '../wallet/chain';
+
 const DECIMALS = 18n;
 const ONE_COIN = 10n ** DECIMALS;
 
@@ -195,4 +197,26 @@ export function formatDateTime(timestamp: number): string {
   const h = String(date.getHours()).padStart(2, '0');
   const min = String(date.getMinutes()).padStart(2, '0');
   return `${y}-${m}-${d} ${h}:${min}`;
+}
+
+/**
+ * 验证人地址转成 0x 形式用于展示。
+ *
+ * 为什么要转：这条链是 Ethermint 系的，用户拿 MetaMask、在区块浏览器里看到的
+ * 都是 0x 地址。给他一个 atoshivaloper1… 他没法和别处交叉核对。
+ * 两种表示是同一串 20 字节，同一个私钥派生，纯前端可转。
+ *
+ * ⚠️ 只用于展示。链上调用（预编译的 delegate/undelegate/redelegate）的
+ * validatorAddress 参数**必须是 bech32 字符串**，传 0x 会被拒。
+ * 所以 UI 里传给 onConfirm 的一律还是 operator_address 原值。
+ *
+ * 转不了时（地址为空、格式不对）返回原值，不抛错 —— 列表页不该因为一个
+ * 地址格式异常就整个渲染失败。
+ */
+export function valoperToHex(valoper: string): string {
+  try {
+    return bech32ToHex(valoper);
+  } catch {
+    return valoper;
+  }
 }

@@ -122,9 +122,9 @@ export const UnbondingTab: React.FC<UnbondingTabProps> = ({
 
       {/* 3. Sub Tab Content */}
       {activeSubTab === 'unbonding' ? (
-        <div className="space-y-3">
+        <div className="space-y-3 lg:grid lg:grid-cols-2 lg:items-start lg:gap-3 lg:space-y-0">
           {unbondingEntries.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-[#E5E7EB] p-8 text-center space-y-2">
+            <div className="bg-white rounded-2xl border border-[#E5E7EB] p-8 text-center space-y-2 lg:col-span-2">
               <div className="w-12 h-12 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center mx-auto">
                 <CheckCircle2 className="w-6 h-6 text-emerald-500" />
               </div>
@@ -183,9 +183,9 @@ export const UnbondingTab: React.FC<UnbondingTabProps> = ({
         </div>
       ) : (
         /* History Tab */
-        <div className="space-y-3">
+        <div className="space-y-3 lg:grid lg:grid-cols-2 lg:items-start lg:gap-3 lg:space-y-0">
           {txHistory.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-[#E5E7EB] p-8 text-center text-gray-400 text-[13px]">
+            <div className="bg-white rounded-2xl border border-[#E5E7EB] p-8 text-center text-gray-400 text-[13px] lg:col-span-2">
               {t('noHistoryTitle')}
             </div>
           ) : (

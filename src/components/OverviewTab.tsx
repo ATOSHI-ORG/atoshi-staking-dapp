@@ -86,9 +86,11 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   const hasUnbonding = BigInt(assets.unbonding_atos || '0') > 0n;
 
   return (
-    <div className="space-y-4 pb-12 animate-in fade-in duration-200">
+    <div
+      className="space-y-4 pb-12 animate-in fade-in duration-200 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0"
+    >
       {/* 1. Top Asset Card (White background, light gray grid dividers, 4 metrics) */}
-      <div className="bg-white rounded-2xl border border-[#E5E7EB] shadow-xs overflow-hidden">
+      <div className="bg-white rounded-2xl border border-[#E5E7EB] shadow-xs overflow-hidden lg:col-span-2">
         {/* Header line of Asset Card */}
         <div className="px-4 py-3 bg-[#FAFBFD] border-b border-[#F0F2F5] flex items-center justify-between">
           <div className="flex items-center gap-1.5">
@@ -308,7 +310,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
       </div>
 
       {/* 4. My Delegations List (我的委托列表) */}
-      <div className="space-y-2.5">
+      <div className="space-y-2.5 lg:col-span-2">
         <div className="flex items-center justify-between px-1">
           <h3 className="text-[14px] font-bold text-gray-900">
             {t('myDelegationsTitle')} <span className="text-[12px] font-normal text-gray-400 font-mono">({delegations.length})</span>
@@ -346,7 +348,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           </div>
         ) : (
           /* Delegations Cards */
-          <div className="space-y-3">
+          <div className="space-y-3 lg:grid lg:grid-cols-2 lg:gap-3 lg:space-y-0">
             {delegations.map((item) => {
               const matchedVal = validators.find((v) => v.operator_address === item.validator_address);
               const isJailed = item.validator_jailed || matchedVal?.jailed;

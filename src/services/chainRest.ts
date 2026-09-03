@@ -118,14 +118,27 @@ export function amountOf(
 }
 
 /**
- * DecCoin 的 amount 是放大 10^18 的定点数，而 Coin 的 amount 是整数。
- * 奖励接口（distribution）返回 DecCoin，委托金额返回 Coin —— 混用会差 10^18 倍。
+ * DecCoin 的 amount 转成最小单位的整数字符串。
+ *
+ * distribution 模块返回的是 DecCoin，它的 amount 是 LegacyDec。**REST 网关把它
+ * 渲染成带小数点的十进制字符串**，小数点前面那段就已经是最小单位（aatox）了：
+ *
+ *   "8735786555267686800000000.000000000000000000"
+ *    └────── 这段就是 aatox ──────┘ └── 只是 Dec 的小数部分 ──┘
+ *
+ * 所以只要截掉小数部分，**不能再除 10^18**。
+ *
+ * 我第一版除了 10^18，理由是「LegacyDec 内部是放大 10^18 的定点数」—— 那句话
+ * 对内部表示成立，但对网关吐出来的这个字符串不成立，它已经把倍数还原过了。
+ * 结果是奖励被缩小 10^18 倍，8,735,786 ATOX 显示成 0.0000，而且不报错。
+ * 判断依据很简单：字符串里有小数点，说明是人类可读的十进制，不是放大后的整数。
  */
 export function decCoinToInt(amount: string | undefined): string {
   if (!amount) return '0';
   const [whole] = amount.split('.');
   try {
-    return (BigInt(whole) / DECIMALS_18).toString();
+    // 走一遍 BigInt 是为了校验它确实是整数，顺手去掉前导零和空串
+    return BigInt(whole || '0').toString();
   } catch {
     return '0';
   }

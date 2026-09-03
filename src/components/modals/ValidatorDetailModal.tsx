@@ -1,7 +1,7 @@
 import React from 'react';
 import { X, ShieldCheck, Globe, Activity, Award, AlertTriangle, ShieldAlert, CheckCircle2, ChevronRight, ExternalLink } from 'lucide-react';
 import { Validator } from '../../types';
-import { formatCoinAmount, formatLargeAmount, formatCommission, shortenAddress } from '../../utils/format';
+import { formatCoinAmount, formatLargeAmount, formatCommission, shortenAddress, valoperToHex } from '../../utils/format';
 import { useLanguage } from '../../i18n/LanguageContext';
 
 interface ValidatorDetailModalProps {
@@ -42,7 +42,7 @@ export const ValidatorDetailModal: React.FC<ValidatorDetailModalProps> = ({
                 <h2 className="text-[16px] font-bold text-gray-900 leading-tight">{validator.moniker}</h2>
               </div>
               <p className="text-[11px] text-gray-400 font-mono mt-0.5">
-                {shortenAddress(validator.operator_address, 10, 8)}
+                {shortenAddress(valoperToHex(validator.operator_address), 10, 8)}
               </p>
             </div>
           </div>
