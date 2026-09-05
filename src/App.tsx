@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   LayoutDashboard, 
   Users, 
@@ -17,14 +17,12 @@ import { UndelegateModal } from './components/modals/UndelegateModal';
 import { RedelegateModal } from './components/modals/RedelegateModal';
 import { ClaimModal } from './components/modals/ClaimModal';
 import { AtoxInfoModal } from './components/modals/AtoxInfoModal';
-import { EnergyInfoModal } from './components/modals/EnergyInfoModal';
 import { SlashingRulesModal } from './components/modals/SlashingRulesModal';
 import { ValidatorDetailModal } from './components/modals/ValidatorDetailModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { useLanguage } from './i18n/LanguageContext';
 import { 
   StakingApi, 
-  USER_ADDRESS as FALLBACK_ADDRESS, 
   DEFAULT_STAKING_PARAMS 
 } from './services/stakingApi';
 import { 
@@ -40,12 +38,40 @@ import {
 import { formatCoinAmount } from './utils/format';
 import { useWallet } from './wallet/useWallet';
 
+const emptyAssets = (address = ''): AccountAssets => ({
+  address,
+  available_atos: '0',
+  staked_atos: '0',
+  unbonding_atos: '0',
+  total_pending_atox: '0',
+});
+
+const emptyAtoxAccount = (address = ''): AtoxAccountData => ({
+  address,
+  atox_balance: '0',
+  pending_atos: '0',
+  cumulative_converted_atos: '0',
+});
+
+const emptyEnergyAccount = (address = ''): EnergyAccountData => ({
+  address,
+  energy_balance: 0,
+  energy_max: 0,
+  qualifies_for_energy: false,
+  available_atos: '0',
+  staked_atos: '0',
+  total_calculated_atos: '0',
+  free_gas_tx_remaining: 0,
+  // The eligibility threshold is a public chain rule, not wallet-owned data.
+  energy_threshold_atos: 30000,
+});
+
 export default function App() {
   const { t } = useLanguage();
 
   // 钱包给的是 0x 地址，但 Cosmos REST 的查询路径只认 atoshi1…，
-  // useWallet 里已经转好了。没连钱包时退回 FALLBACK_ADDRESS（mock 模式的假地址，
-  // 或 chain 模式的 VITE_DEMO_ADDRESS），让页面有东西可渲染。
+  // useWallet 里已经转好了。没有真实钱包地址时，账户数据必须保持为零；
+  // 验证人列表和 ATOX 全局状态等公共数据仍可正常读取。
   const {
     bech32Address,
     isConnected,
@@ -53,31 +79,21 @@ export default function App() {
     wrongChain,
     hasProvider,
     connect: connectWallet,
+    disconnect: disconnectWallet,
     switchToAtoshi,
   } = useWallet();
-  const userAddress = bech32Address || FALLBACK_ADDRESS;
+  const userAddress = isConnected ? bech32Address : '';
 
   const [activeTab, setActiveTab] = useState<'overview' | 'validators' | 'unbonding'>('overview');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   // Core chain state
-  const [assets, setAssets] = useState<AccountAssets>({
-    address: userAddress,
-    available_atos: '0',
-    staked_atos: '0',
-    unbonding_atos: '0',
-    total_pending_atox: '0',
-  });
+  const [assets, setAssets] = useState<AccountAssets>(() => emptyAssets());
   const [validators, setValidators] = useState<Validator[]>([]);
   const [delegations, setDelegations] = useState<DelegationItem[]>([]);
   const [unbondingEntries, setUnbondingEntries] = useState<UnbondingEntry[]>([]);
-  const [atoxAccount, setAtoxAccount] = useState<AtoxAccountData>({
-    address: userAddress,
-    atox_balance: '0',
-    pending_atos: '0',
-    cumulative_converted_atos: '0',
-  });
+  const [atoxAccount, setAtoxAccount] = useState<AtoxAccountData>(() => emptyAtoxAccount());
   const [atoxGlobal, setAtoxGlobal] = useState<AtoxGlobalData>({
     global_index: '1.0',
     total_released_to_pool: '0',
@@ -87,18 +103,10 @@ export default function App() {
     tier_name: 'Tier 1',
     next_tier_progress_percent: 0,
   });
-  const [energyData, setEnergyData] = useState<EnergyAccountData>({
-    address: userAddress,
-    energy_balance: 0,
-    energy_max: 10000,
-    qualifies_for_energy: false,
-    available_atos: '0',
-    staked_atos: '0',
-    total_calculated_atos: '0',
-    free_gas_tx_remaining: 0,
-    energy_threshold_atos: 30000,
-  });
+  const [energyData, setEnergyData] = useState<EnergyAccountData>(() => emptyEnergyAccount());
   const [txHistory, setTxHistory] = useState<StakingTxHistory[]>([]);
+  const loadRequestId = useRef(0);
+  const loadedAccountAddress = useRef('');
 
   // Toast management
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -129,48 +137,78 @@ export default function App() {
   const [selectedDelegationForClaim, setSelectedDelegationForClaim] = useState<DelegationItem | null>(null);
 
   const [isAtoxInfoOpen, setIsAtoxInfoOpen] = useState(false);
-  const [isEnergyInfoOpen, setIsEnergyInfoOpen] = useState(false);
   const [isSlashingRulesOpen, setIsSlashingRulesOpen] = useState(false);
 
   const [isValidatorDetailOpen, setIsValidatorDetailOpen] = useState(false);
   const [selectedValidatorForDetail, setSelectedValidatorForDetail] = useState<Validator | null>(null);
 
-  // Load all on-chain data
+  // Public chain data is available without a wallet. Account data is only queried
+  // after a real address is connected, and is cleared immediately on disconnect/switch.
   const loadData = useCallback(async (showRefreshing = false) => {
+    const requestId = ++loadRequestId.current;
+    const accountAddress = userAddress;
+
     if (showRefreshing) setIsRefreshing(true);
+
+    if (loadedAccountAddress.current !== accountAddress) {
+      loadedAccountAddress.current = '';
+      setAssets(emptyAssets(accountAddress));
+      setDelegations([]);
+      setUnbondingEntries([]);
+      setAtoxAccount(emptyAtoxAccount(accountAddress));
+      setEnergyData(emptyEnergyAccount(accountAddress));
+      setTxHistory([]);
+    }
+
     try {
-      const [
-        valList,
-        delList,
-        unbondList,
-        atoxAcc,
-        atoxGlob,
-        energyAcc,
-        assetData,
-        hist,
-      ] = await Promise.all([
-        StakingApi.getValidators(),
-        StakingApi.getDelegations(userAddress),
-        StakingApi.getUnbonding(userAddress),
-        StakingApi.getAtoxAccount(userAddress),
-        StakingApi.getAtoxGlobal(),
-        StakingApi.getEnergyAccount(userAddress),
-        StakingApi.getAccountAssets(userAddress),
-        StakingApi.getHistory(),
+      const accountDataPromise = accountAddress
+        ? Promise.all([
+            StakingApi.getDelegations(accountAddress),
+            StakingApi.getUnbonding(accountAddress),
+            StakingApi.getAtoxAccount(accountAddress),
+            StakingApi.getEnergyAccount(accountAddress),
+            StakingApi.getAccountAssets(accountAddress),
+            StakingApi.getHistory(accountAddress),
+          ])
+        : Promise.resolve(null);
+
+      const [[valList, atoxGlob], accountData] = await Promise.all([
+        Promise.all([StakingApi.getValidators(), StakingApi.getAtoxGlobal()]),
+        accountDataPromise,
       ]);
 
+      if (requestId !== loadRequestId.current) return;
+
       setValidators(valList);
-      setDelegations(delList);
-      setUnbondingEntries(unbondList);
-      setAtoxAccount(atoxAcc);
       setAtoxGlobal(atoxGlob);
-      setEnergyData(energyAcc);
-      setAssets(assetData);
-      setTxHistory(hist);
+
+      if (accountData) {
+        const [delList, unbondList, atoxAcc, energyAcc, assetData, hist] = accountData;
+        setDelegations(delList);
+        setUnbondingEntries(unbondList);
+        setAtoxAccount(atoxAcc);
+        setEnergyData(energyAcc);
+        setAssets(assetData);
+        const validatorNames = new Map(valList.map((validator) => [validator.operator_address, validator.moniker]));
+        setTxHistory(
+          hist.map((tx) => ({
+            ...tx,
+            validator_moniker: tx.validator_address
+              ? validatorNames.get(tx.validator_address)
+              : undefined,
+            dst_validator_moniker: tx.dst_validator_address
+              ? validatorNames.get(tx.dst_validator_address)
+              : undefined,
+          })),
+        );
+        loadedAccountAddress.current = accountAddress;
+      }
     } catch (e: any) {
+      if (requestId !== loadRequestId.current) return;
       console.error('Failed to load staking data', e);
       addToast('error', t('toastErrorGeneral'), e?.message || '');
     } finally {
+      if (requestId !== loadRequestId.current) return;
       setIsLoading(false);
       setIsRefreshing(false);
     }
@@ -182,6 +220,7 @@ export default function App() {
 
   // Handlers for core on-chain operations
   const handleConfirmDelegate = async (valoper: string, rawAmount: string) => {
+    if (!userAddress) throw new Error(t('walletConnectHint'));
     const res = await StakingApi.delegate({
       delegator: userAddress,
       validator: valoper,
@@ -196,6 +235,7 @@ export default function App() {
   };
 
   const handleConfirmUndelegate = async (valoper: string, rawAmount: string) => {
+    if (!userAddress) throw new Error(t('walletConnectHint'));
     const res = await StakingApi.undelegate({
       delegator: userAddress,
       validator: valoper,
@@ -210,6 +250,7 @@ export default function App() {
   };
 
   const handleConfirmRedelegate = async (srcVal: string, dstVal: string, rawAmount: string) => {
+    if (!userAddress) throw new Error(t('walletConnectHint'));
     const res = await StakingApi.redelegate({
       delegator: userAddress,
       src_validator: srcVal,
@@ -225,6 +266,7 @@ export default function App() {
   };
 
   const handleConfirmWithdrawRewards = async (validatorValoper?: string) => {
+    if (!userAddress) throw new Error(t('walletConnectHint'));
     const res = await StakingApi.withdrawRewards({
       delegator: userAddress,
       validator: validatorValoper,
@@ -250,12 +292,10 @@ export default function App() {
       <div className="w-full max-w-[430px] min-h-screen bg-[#F8F9FB] flex flex-col shadow-lg relative border-x border-[#ECEFF3] lg:max-w-[1080px] lg:border-x-0 lg:shadow-none lg:bg-[#F6F8FA]">
         {/* Top Wallet WebView Header */}
         <WalletHeader
-          address={userAddress}
-          energyBalance={energyData.energy_balance}
-          qualifiesForEnergy={energyData.qualifies_for_energy}
+          address={isConnected ? bech32Address : undefined}
           onRefresh={() => loadData(true)}
           isLoading={isRefreshing}
-          onOpenEnergyInfo={() => setIsEnergyInfoOpen(true)}
+          onDisconnect={disconnectWallet}
         />
 
         <WalletBar
@@ -308,7 +348,6 @@ export default function App() {
                     setIsClaimOpen(true);
                   }}
                   onOpenAtoxInfo={() => setIsAtoxInfoOpen(true)}
-                  onOpenEnergyInfo={() => setIsEnergyInfoOpen(true)}
                   onNavigateToValidators={() => setActiveTab('validators')}
                   onNavigateToUnbonding={() => setActiveTab('unbonding')}
                 />
@@ -343,14 +382,14 @@ export default function App() {
         {/* Bottom Tab Bar (White background, light gray divider, fixed 3-tab navigation) */}
         <nav 
           id="staking-bottom-nav"
-          className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-white border-t border-[#F0F2F5] px-2 py-1.5 flex items-center justify-around z-30 shadow-md lg:hidden"
+          className="fixed bottom-0 left-1/2 z-30 grid w-[calc(100%-34px)] max-w-[396px] -translate-x-1/2 grid-cols-3 items-center border-t border-[#F0F2F5] bg-white px-2 py-1.5 shadow-md lg:hidden"
         >
           {/* Tab 1: 概览 */}
           <button
             type="button"
             id="nav-tab-overview"
             onClick={() => setActiveTab('overview')}
-            className={`flex flex-col items-center py-1 px-4 rounded-xl transition-colors ${
+            className={`flex h-12 min-w-0 w-full flex-col items-center justify-center rounded-xl transition-colors ${
               activeTab === 'overview'
                 ? 'text-blue-600 font-bold'
                 : 'text-gray-400 hover:text-gray-600 font-medium'
@@ -365,7 +404,7 @@ export default function App() {
             type="button"
             id="nav-tab-validators"
             onClick={() => setActiveTab('validators')}
-            className={`flex flex-col items-center py-1 px-4 rounded-xl transition-colors ${
+            className={`flex h-12 min-w-0 w-full flex-col items-center justify-center rounded-xl transition-colors ${
               activeTab === 'validators'
                 ? 'text-blue-600 font-bold'
                 : 'text-gray-400 hover:text-gray-600 font-medium'
@@ -380,7 +419,7 @@ export default function App() {
             type="button"
             id="nav-tab-unbonding"
             onClick={() => setActiveTab('unbonding')}
-            className={`flex flex-col items-center py-1 px-4 rounded-xl transition-colors relative ${
+            className={`relative flex h-12 min-w-0 w-full flex-col items-center justify-center rounded-xl transition-colors ${
               activeTab === 'unbonding'
                 ? 'text-blue-600 font-bold'
                 : 'text-gray-400 hover:text-gray-600 font-medium'
@@ -435,14 +474,6 @@ export default function App() {
         <AtoxInfoModal
           isOpen={isAtoxInfoOpen}
           onClose={() => setIsAtoxInfoOpen(false)}
-          globalData={atoxGlobal}
-          accountData={atoxAccount}
-        />
-
-        <EnergyInfoModal
-          isOpen={isEnergyInfoOpen}
-          onClose={() => setIsEnergyInfoOpen(false)}
-          energyData={energyData}
         />
 
         <SlashingRulesModal

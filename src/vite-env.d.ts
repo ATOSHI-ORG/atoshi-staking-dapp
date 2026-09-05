@@ -5,11 +5,11 @@
  * 是为了拼错变量名时能在编译期发现。
  */
 interface ImportMetaEnv {
-  /** mock（默认，内置模拟数据）| chain（连真链） */
+  /** chain（默认，连真链）| mock（显式启用的内置模拟数据） */
   readonly VITE_API_MODE?: 'mock' | 'chain';
 
   /**
-   * Cosmos REST（LCD）根地址，chain 模式必填。
+   * Cosmos REST（LCD）根地址，默认使用 Atoshi 测试网 REST。
    * 对应节点 app.toml 的 [api]，默认端口 1317。
    * ⚠️ 不是 EVM JSON-RPC（8545），也不是 CometBFT RPC（26657）。
    */
@@ -41,6 +41,8 @@ interface ImportMetaEnv {
 
   /** 区块浏览器地址，用于交易成功后的跳转链接 */
   readonly VITE_EXPLORER_URL?: string;
+  /** Blockscout API v2 根地址，默认在区块浏览器地址后追加 /api/v2 */
+  readonly VITE_EXPLORER_API_URL?: string;
 }
 
 interface ImportMeta {

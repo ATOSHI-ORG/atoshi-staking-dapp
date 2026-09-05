@@ -59,6 +59,23 @@ export const stakingAbi = [
 
 export const distributionAbi = [
   {
+    type: 'event',
+    name: 'ClaimRewards',
+    inputs: [
+      { name: 'delegatorAddress', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'WithdrawDelegatorRewards',
+    inputs: [
+      { name: 'delegatorAddress', type: 'address', indexed: true },
+      { name: 'validatorAddress', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+    ],
+  },
+  {
     type: 'function',
     name: 'withdrawDelegatorRewards',
     stateMutability: 'nonpayable',

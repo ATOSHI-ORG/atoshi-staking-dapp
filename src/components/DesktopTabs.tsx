@@ -31,7 +31,7 @@ export function DesktopTabs({ activeTab, onChange, unbondingCount }: DesktopTabs
   ];
 
   return (
-    <nav className="hidden lg:flex items-center gap-1 border-b border-[#ECEFF3] bg-white px-8">
+    <nav className="mx-4 hidden items-center gap-1 border-b border-[#ECEFF3] bg-white lg:mx-8 lg:flex">
       {tabs.map(({ key, label, icon: Icon }) => {
         const active = activeTab === key;
         return (

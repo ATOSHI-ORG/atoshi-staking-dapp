@@ -53,7 +53,7 @@ export const ClaimModal: React.FC<ClaimModalProps> = ({
     setErrorMsg(null);
 
     try {
-      await onConfirm(isClaimSingle ? targetDelegation.validator_address : 'all');
+      await onConfirm(isClaimSingle ? targetDelegation.validator_address : undefined);
       onClose();
     } catch (err: any) {
       setErrorMsg(err?.message || t('toastErrorGeneral'));

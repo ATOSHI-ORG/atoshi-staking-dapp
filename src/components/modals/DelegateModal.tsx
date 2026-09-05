@@ -53,6 +53,8 @@ export const DelegateModal: React.FC<DelegateModalProps> = ({
   const availableNum = rawToNumber(availableAtos);
   const gasBuffer = 0.1; // 0.1 ATOS gas buffer
   const maxAvailableForStake = Math.max(0, availableNum - gasBuffer);
+  const rawAmountInput = parseHumanAmountToRaw(amountInput);
+  const hasPositiveAmount = BigInt(rawAmountInput) > 0n;
 
   const handleQuickPercent = (pct: number) => {
     const calculated = (maxAvailableForStake * pct) / 100;
@@ -71,8 +73,8 @@ export const DelegateModal: React.FC<DelegateModalProps> = ({
       return;
     }
 
-    const inputNum = parseFloat(amountInput);
-    if (isNaN(inputNum) || inputNum <= 0) {
+    const inputNum = Number(amountInput);
+    if (!hasPositiveAmount || !Number.isFinite(inputNum)) {
       setErrorMsg(t('errInvalidAmount'));
       return;
     }
@@ -91,8 +93,7 @@ export const DelegateModal: React.FC<DelegateModalProps> = ({
     setErrorMsg(null);
 
     try {
-      const rawAmount = parseHumanAmountToRaw(amountInput);
-      await onConfirm(selectedValidator.operator_address, rawAmount);
+      await onConfirm(selectedValidator.operator_address, rawAmountInput);
       onClose();
     } catch (err: any) {
       setErrorMsg(err?.message || t('toastErrorGeneral'));
@@ -320,8 +321,9 @@ export const DelegateModal: React.FC<DelegateModalProps> = ({
             <button
               type="button"
               id="delegate-next-btn"
+              disabled={!selectedValidator || selectedValidator.jailed || !hasPositiveAmount}
               onClick={handleNextStep}
-              className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-medium rounded-xl text-[14px] transition-colors flex items-center justify-center gap-1.5"
+              className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-medium rounded-xl text-[14px] transition-colors flex items-center justify-center gap-1.5 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
             >
               <span>{t('btnNextReview')}</span>
               <ArrowRight className="w-4 h-4" />

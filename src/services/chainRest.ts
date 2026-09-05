@@ -17,7 +17,9 @@ export const BOND_DENOM = (import.meta.env.VITE_BOND_DENOM as string) || 'liao';
 export const ATOX_DENOM = (import.meta.env.VITE_ATOX_DENOM as string) || 'aatox';
 
 /** Cosmos REST 的根地址，不含尾斜杠 */
-export const REST_BASE = ((import.meta.env.VITE_REST_URL as string) || '').replace(/\/+$/, '');
+export const REST_BASE = (
+  (import.meta.env.VITE_REST_URL as string) || 'https://rpc-testnet.atoshi.org/rest-api'
+).replace(/\/+$/, '');
 
 export class ChainRestError extends Error {
   constructor(

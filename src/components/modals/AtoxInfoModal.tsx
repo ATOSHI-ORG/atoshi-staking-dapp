@@ -1,23 +1,17 @@
 import React from 'react';
-import { X, Sparkles, RefreshCcw, Layers, ArrowRight, ShieldCheck, Info } from 'lucide-react';
-import { formatCoinAmount, formatLargeAmount } from '../../utils/format';
-import { AtoxGlobalData, AtoxAccountData } from '../../types';
+import { X, Sparkles, ShieldCheck } from 'lucide-react';
 import { useLanguage } from '../../i18n/LanguageContext';
 
 interface AtoxInfoModalProps {
   isOpen: boolean;
   onClose: () => void;
-  globalData: AtoxGlobalData;
-  accountData: AtoxAccountData;
 }
 
 export const AtoxInfoModal: React.FC<AtoxInfoModalProps> = ({
   isOpen,
   onClose,
-  globalData,
-  accountData,
 }) => {
-  const { language, t } = useLanguage();
+  const { t } = useLanguage();
   if (!isOpen) return null;
 
   return (
@@ -79,52 +73,6 @@ export const AtoxInfoModal: React.FC<AtoxInfoModalProps> = ({
             </div>
           </div>
 
-          {/* Global Progress & Account stats */}
-          <div className="bg-white p-4 rounded-xl border border-[#E5E7EB] space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-gray-900 flex items-center gap-1.5">
-                <Layers className="w-4 h-4 text-blue-600" />
-                {t('atoxTrackerTitle')}
-              </span>
-              <span className="text-[12px] text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded">
-                {globalData.tier_name}
-              </span>
-            </div>
-
-            <div>
-              <div className="flex justify-between text-[12px] text-gray-500 mb-1">
-                <span>{t('releasedToPool')}</span>
-                <span className="font-mono font-medium text-gray-800">
-                  {formatLargeAmount(globalData.total_released_to_pool, 'ATOS', language)}
-                </span>
-              </div>
-              <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, Math.max(2, (Number(globalData.total_released_to_pool) / (1e12 * 1e18)) * 100))}%` }}
-                ></div>
-              </div>
-              <div className="flex justify-between text-[11px] text-gray-400 mt-1">
-                <span>{t('progressLabel', { percent: ((Number(BigInt(globalData.total_released_to_pool) / 1000000000000000000n) / 1000000000000) * 100).toFixed(4) })}</span>
-                <span>{t('totalAtoxSupplyLabel')}</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#F0F2F5] text-[12px]">
-              <div className="bg-gray-50 p-2.5 rounded-lg">
-                <div className="text-gray-400 text-[11px]">{t('myAtoxBalance')}</div>
-                <div className="font-mono font-bold text-gray-900 mt-0.5">
-                  {formatCoinAmount(accountData.atox_balance, 4)} <span className="text-[10px] text-gray-500 font-normal">ATOX</span>
-                </div>
-              </div>
-              <div className="bg-gray-50 p-2.5 rounded-lg">
-                <div className="text-gray-400 text-[11px]">{t('cumulativeConvertedAtos')}</div>
-                <div className="font-mono font-bold text-emerald-600 mt-0.5">
-                  {formatCoinAmount(accountData.cumulative_converted_atos, 4)} <span className="text-[10px] text-gray-500 font-normal">ATOS</span>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Footer */}

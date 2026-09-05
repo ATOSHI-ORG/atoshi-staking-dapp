@@ -470,7 +470,7 @@ export const StakingApiMock = {
   },
 
   // GET /staking/history
-  async getHistory(): Promise<StakingTxHistory[]> {
+  async getHistory(_address?: string): Promise<StakingTxHistory[]> {
     await new Promise((r) => setTimeout(r, 150));
     return [...currentState.tx_history];
   },

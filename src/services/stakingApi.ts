@@ -1,9 +1,8 @@
 /**
  * StakingApi 的切换层。UI 只 import 这个文件，不关心数据来自哪里。
  *
- *   VITE_API_MODE=mock   （默认）内置模拟数据，不需要节点。
- *                        给产品和设计看页面、以及节点还没就绪时用。
- *   VITE_API_MODE=chain  连真链的 Cosmos REST，需要 VITE_REST_URL。
+ *   VITE_API_MODE=chain  （默认）连接真实链上数据。
+ *   VITE_API_MODE=mock   只有显式设置时才使用内置模拟数据。
  *
  * 之所以保留 mock 而不是直接换掉：真链的 REST 端点（节点 app.toml 的 [api]，
  * 默认 1317）目前还没对外暴露，只暴露了 EVM JSON-RPC（8545）。而质押、委托、
@@ -25,17 +24,15 @@ export type ApiMode = 'mock' | 'chain';
  */
 export const API_MODE: ApiMode = (() => {
   const mode = (import.meta.env.VITE_API_MODE as string | undefined)?.trim();
-  if (mode === 'chain') {
-    if (!REST_BASE) {
-      throw new Error(
-        'VITE_API_MODE=chain 但没有配置 VITE_REST_URL。' +
-          '质押数据需要节点的 Cosmos REST 端点（app.toml 的 [api]，默认 1317），' +
-          '不是 EVM JSON-RPC（8545）。',
-      );
-    }
-    return 'chain';
+  if (mode === 'mock') return 'mock';
+  if (!REST_BASE) {
+    throw new Error(
+      '没有配置 VITE_REST_URL。' +
+        '质押数据需要节点的 Cosmos REST 端点（app.toml 的 [api]，默认 1317），' +
+        '不是 EVM JSON-RPC（8545）。',
+    );
   }
-  return 'mock';
+  return 'chain';
 })();
 
 export const StakingApi = API_MODE === 'chain' ? StakingApiChain : StakingApiMock;

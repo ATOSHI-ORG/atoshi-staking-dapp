@@ -35,7 +35,7 @@ export function WalletBar({
 
   if (wrongChain) {
     return (
-      <div className="mx-4 mt-3 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5">
+      <div className="mx-4 mt-3 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 lg:mx-8">
         <AlertTriangle className="h-4 w-4 shrink-0 text-red-500" />
         <p className="flex-1 text-[12px] leading-snug text-red-700">{t('walletWrongChain')}</p>
         <button
@@ -51,7 +51,7 @@ export function WalletBar({
   if (isConnected) return null;
 
   return (
-    <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-[#ECEFF3] bg-white px-3 py-2.5">
+    <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-[#ECEFF3] bg-white px-3 py-2.5 lg:mx-8">
       <p className="flex-1 text-[12px] leading-snug text-gray-500">
         {/* 页面在普通浏览器里打开时根本没有钱包可连，这时提示「请连接钱包」是
             误导 —— 用户点了也不会有任何反应。分开说清楚。 */}

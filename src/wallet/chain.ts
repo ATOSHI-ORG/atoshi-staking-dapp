@@ -22,6 +22,14 @@ const EVM_RPC = ((import.meta.env.VITE_EVM_RPC_URL as string) || 'https://rpc-te
   '',
 );
 
+export const EXPLORER_URL = (
+  (import.meta.env.VITE_EXPLORER_URL as string) || 'https://explorer-testnet.atoshi.org'
+).replace(/\/+$/, '');
+
+export const EXPLORER_API_URL = (
+  (import.meta.env.VITE_EXPLORER_API_URL as string) || `${EXPLORER_URL}/api/v2`
+).replace(/\/+$/, '');
+
 export const atoshi = defineChain({
   id: CHAIN_ID,
   name: 'Atoshi',
@@ -34,7 +42,7 @@ export const atoshi = defineChain({
   blockExplorers: {
     default: {
       name: 'Atoshi Explorer',
-      url: (import.meta.env.VITE_EXPLORER_URL as string) || 'https://explorer-testnet.atoshi.org',
+      url: EXPLORER_URL,
     },
   },
   testnet: CHAIN_ID !== 88888,

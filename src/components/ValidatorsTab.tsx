@@ -249,7 +249,7 @@ export const ValidatorsTab: React.FC<ValidatorsTabProps> = ({
       </div>
 
       {/* 4. Validator Cards List */}
-      <div className="space-y-3 lg:grid lg:grid-cols-2 lg:items-start lg:gap-3 lg:space-y-0">
+      <div className="space-y-3 lg:grid lg:grid-cols-2 lg:items-stretch lg:gap-3 lg:space-y-0">
         {filteredList.length === 0 ? (
           <div className="bg-white rounded-2xl border border-[#E5E7EB] p-8 text-center text-gray-400 text-[13px] lg:col-span-2">
             {t('noValidatorsMatched')}
@@ -261,14 +261,14 @@ export const ValidatorsTab: React.FC<ValidatorsTabProps> = ({
             return (
               <div
                 key={val.operator_address}
-                className={`bg-white rounded-2xl border transition-all shadow-xs overflow-hidden ${
+                className={`flex h-full flex-col overflow-hidden rounded-2xl border bg-white shadow-xs transition-all ${
                   val.jailed
                     ? 'border-rose-200/90 bg-rose-50/20'
                     : 'border-[#E5E7EB] hover:border-blue-300'
                 }`}
               >
                 {/* Validator Header */}
-                <div className="p-4 space-y-3">
+                <div className="flex-1 p-4 space-y-3">
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-2.5">
                       <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-700 font-bold flex items-center justify-center text-[14px] border border-blue-100 shrink-0">
@@ -361,11 +361,8 @@ export const ValidatorsTab: React.FC<ValidatorsTabProps> = ({
                   </div>
 
                   {/* Chain Self-Delegation Rule Note */}
-                  <div className="text-[11px] text-gray-500 flex items-center justify-between">
+                  <div className="text-[11px] text-gray-500">
                     <span>{t('chainSelfDelegationRule')}</span>
-                    <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-                      {t('rewardIsAtoxBadge')}
-                    </span>
                   </div>
                 </div>
 

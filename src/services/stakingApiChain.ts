@@ -61,8 +61,9 @@ import {
  */
 
 import { getAccount, waitForTransactionReceipt, writeContract } from 'wagmi/actions';
+import { decodeEventLog, decodeFunctionData, type Hex } from 'viem';
 
-import { atoshi, toBech32, toHex } from '../wallet/chain';
+import { EXPLORER_API_URL, atoshi, toBech32, toHex } from '../wallet/chain';
 import { wagmiConfig } from '../wallet/config';
 import {
   DISTRIBUTION_PRECOMPILE,
@@ -509,16 +510,170 @@ async function getAccountAssets(address: string): Promise<AccountAssets> {
   };
 }
 
-/**
- * 交易历史。
- *
- * 链上没有「某地址的质押操作历史」这个查询 —— 要靠 tx 事件索引拼，
- * 而 REST 的 /cosmos/tx/v1beta1/txs?query= 在不同版本上语法不一致，
- * 而且需要节点开着 tx_index。这块建议由后端做一个索引服务，
- * 前端读一个稳定的接口。这里先返回空列表，UI 会显示空状态。
- */
-async function getHistory(): Promise<StakingTxHistory[]> {
-  return [];
+interface ExplorerTransaction {
+  hash: string;
+  raw_input?: Hex;
+  result?: string | null;
+  status?: string | null;
+  timestamp?: string | null;
+  from?: { hash?: string | null } | null;
+  to?: { hash?: string | null } | null;
+  fee?: { value?: string | null } | null;
+}
+
+interface ExplorerLog {
+  data?: Hex;
+  topics?: Array<Hex | null>;
+}
+
+async function explorerGet<T>(path: string, timeoutMs = 12000): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${EXPLORER_API_URL}${path}`, {
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new ChainRestError(`区块浏览器请求失败 (HTTP ${response.status})`, response.status, path);
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof ChainRestError) throw error;
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new ChainRestError(`区块浏览器请求超时 (${timeoutMs}ms)`, undefined, path);
+    }
+    throw new ChainRestError('无法连接区块浏览器，暂时不能加载质押流水。', undefined, path);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function explorerTxStatus(tx: ExplorerTransaction): StakingTxHistory['status'] {
+  if (!tx.status && !tx.result) return 'pending';
+  return tx.status === 'ok' || tx.result === 'success' ? 'success' : 'failed';
+}
+
+function historyRecord(
+  tx: ExplorerTransaction,
+  type: StakingTxHistory['type'],
+  amount: string,
+  denom: StakingTxHistory['denom'],
+  validatorAddress?: string,
+  dstValidatorAddress?: string,
+): StakingTxHistory {
+  const fee = tx.fee?.value || '0';
+  return {
+    id: tx.hash,
+    tx_hash: tx.hash,
+    type,
+    amount,
+    denom,
+    validator_address: validatorAddress,
+    dst_validator_address: dstValidatorAddress,
+    timestamp: tx.timestamp ? Date.parse(tx.timestamp) : Date.now(),
+    status: explorerTxStatus(tx),
+    fee_atos: fee,
+    is_free_gas: BigInt(fee) === 0n,
+  };
+}
+
+async function rewardAmountFromLogs(txHash: string): Promise<string> {
+  try {
+    const response = await explorerGet<{ items?: ExplorerLog[] }>(`/transactions/${txHash}/logs`);
+    for (const log of response.items ?? []) {
+      if (!log.data || !log.topics) continue;
+      const topics = log.topics.filter((topic): topic is Hex => Boolean(topic));
+      if (topics.length === 0) continue;
+
+      try {
+        const decoded = decodeEventLog({
+          abi: distributionAbi,
+          data: log.data,
+          topics: topics as [Hex, ...Hex[]],
+          strict: false,
+        }) as unknown as {
+          eventName: string;
+          args: { amount?: bigint };
+        };
+        if (decoded.eventName === 'ClaimRewards' || decoded.eventName === 'WithdrawDelegatorRewards') {
+          return (decoded.args.amount ?? 0n).toString();
+        }
+      } catch {
+        // Other events in the same transaction do not belong to the distribution precompile.
+      }
+    }
+  } catch {
+    // Keep the transaction visible even when its event details are temporarily unavailable.
+  }
+  return '0';
+}
+
+async function explorerTxToHistory(
+  tx: ExplorerTransaction,
+  account: `0x${string}`,
+): Promise<StakingTxHistory | null> {
+  if (tx.from?.hash?.toLowerCase() !== account.toLowerCase() || !tx.raw_input) return null;
+
+  const target = tx.to?.hash?.toLowerCase();
+  try {
+    if (target === STAKING_PRECOMPILE.toLowerCase()) {
+      const decoded = decodeFunctionData({ abi: stakingAbi, data: tx.raw_input });
+      const args = decoded.args as readonly unknown[];
+      if (decoded.functionName === 'delegate') {
+        return historyRecord(tx, 'delegate', String(args[2]), 'ATOS', String(args[1]));
+      }
+      if (decoded.functionName === 'undelegate') {
+        return historyRecord(tx, 'undelegate', String(args[2]), 'ATOS', String(args[1]));
+      }
+      if (decoded.functionName === 'redelegate') {
+        return historyRecord(
+          tx,
+          'redelegate',
+          String(args[3]),
+          'ATOS',
+          String(args[1]),
+          String(args[2]),
+        );
+      }
+    }
+
+    if (target === DISTRIBUTION_PRECOMPILE.toLowerCase()) {
+      const decoded = decodeFunctionData({ abi: distributionAbi, data: tx.raw_input });
+      const args = decoded.args as readonly unknown[];
+      const amount = await rewardAmountFromLogs(tx.hash);
+      if (decoded.functionName === 'withdrawDelegatorRewards') {
+        return historyRecord(tx, 'withdraw_rewards', amount, 'ATOX', String(args[1]));
+      }
+      if (decoded.functionName === 'claimRewards') {
+        return historyRecord(tx, 'withdraw_rewards', amount, 'ATOX');
+      }
+    }
+  } catch {
+    // Ignore unrelated methods sent to the same precompile address.
+  }
+
+  return null;
+}
+
+/** Load and decode staking precompile calls indexed by Blockscout. */
+async function getHistory(address: string): Promise<StakingTxHistory[]> {
+  const account = toHex(address);
+  try {
+    const response = await explorerGet<{ items?: ExplorerTransaction[] }>(
+      `/addresses/${account}/transactions`,
+    );
+    const rows = await Promise.all(
+      (response.items ?? []).map((tx) => explorerTxToHistory(tx, account)),
+    );
+    return rows
+      .filter((tx): tx is StakingTxHistory => tx !== null)
+      .sort((a, b) => b.timestamp - a.timestamp);
+  } catch (error) {
+    console.error('Failed to load staking transaction history', error);
+    return [];
+  }
 }
 
 /* ────────────────────────────── 写操作（走 EVM 预编译） ────────────────────────────── */

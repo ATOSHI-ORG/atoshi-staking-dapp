@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { useAccount, useConnect, useSwitchChain } from 'wagmi';
+import { useAccount, useConnect, useDisconnect, useSwitchChain } from 'wagmi';
 
 import { CHAIN_ID, hexToBech32 } from './chain';
 
@@ -34,6 +34,7 @@ function isAtoshiWebView(): boolean {
 export function useWallet() {
   const { address, isConnected, chainId } = useAccount();
   const { connect, connectors, isPending } = useConnect();
+  const { disconnect } = useDisconnect();
   const { switchChain } = useSwitchChain();
   const [autoTried, setAutoTried] = useState(false);
 
@@ -81,6 +82,7 @@ export function useWallet() {
     connect: () => {
       if (injectedConnector) connect({ connector: injectedConnector });
     },
+    disconnect: () => disconnect(),
     switchToAtoshi: () => switchChain({ chainId: CHAIN_ID }),
   };
 }
