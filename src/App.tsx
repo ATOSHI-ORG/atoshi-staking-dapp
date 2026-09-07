@@ -73,6 +73,7 @@ export default function App() {
   // useWallet 里已经转好了。没有真实钱包地址时，账户数据必须保持为零；
   // 验证人列表和 ATOX 全局状态等公共数据仍可正常读取。
   const {
+    address,
     bech32Address,
     isConnected,
     isConnecting,
@@ -292,7 +293,7 @@ export default function App() {
       <div className="w-full max-w-[430px] min-h-screen bg-[#F8F9FB] flex flex-col shadow-lg relative border-x border-[#ECEFF3] lg:max-w-[1080px] lg:border-x-0 lg:shadow-none lg:bg-[#F6F8FA]">
         {/* Top Wallet WebView Header */}
         <WalletHeader
-          address={isConnected ? bech32Address : undefined}
+          address={isConnected ? address : undefined}
           onRefresh={() => loadData(true)}
           isLoading={isRefreshing}
           onDisconnect={disconnectWallet}

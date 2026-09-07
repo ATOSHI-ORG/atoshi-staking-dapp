@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, ShieldCheck, Clock, AlertTriangle, ArrowRight, Loader2, CheckCircle2, Zap } from 'lucide-react';
 import { Validator, EnergyAccountData } from '../../types';
-import { formatCoinAmount, parseHumanAmountToRaw, rawToNumber, formatCommission, valoperToHex } from '../../utils/format';
+import { formatCoinAmount, parseHumanAmountToRaw, formatCommission, valoperToHex } from '../../utils/format';
 import { useLanguage } from '../../i18n/LanguageContext';
 
 interface DelegateModalProps {
@@ -50,15 +50,23 @@ export const DelegateModal: React.FC<DelegateModalProps> = ({
 
   if (!isOpen) return null;
 
-  const availableNum = rawToNumber(availableAtos);
-  const gasBuffer = 0.1; // 0.1 ATOS gas buffer
-  const maxAvailableForStake = Math.max(0, availableNum - gasBuffer);
+  let availableRaw = 0n;
+  try {
+    availableRaw = BigInt(availableAtos || '0');
+  } catch {
+    availableRaw = 0n;
+  }
+  const gasBufferRaw = 100000000000000000n; // 0.1 ATOS gas buffer
+  const maxAvailableForStakeRaw = availableRaw > gasBufferRaw ? availableRaw - gasBufferRaw : 0n;
   const rawAmountInput = parseHumanAmountToRaw(amountInput);
   const hasPositiveAmount = BigInt(rawAmountInput) > 0n;
 
   const handleQuickPercent = (pct: number) => {
-    const calculated = (maxAvailableForStake * pct) / 100;
-    setAmountInput(calculated > 0 ? calculated.toFixed(4) : '0');
+    // Percent buttons reflect the displayed available balance. Only Max keeps
+    // the gas reserve, so 25% of 1,000,000 is exactly 250,000.
+    const baseRaw = pct === 100 ? maxAvailableForStakeRaw : availableRaw;
+    const calculatedRaw = (baseRaw * BigInt(pct)) / 100n;
+    setAmountInput(formatCoinAmount(calculatedRaw).replace(/,/g, ''));
     setErrorMsg(null);
   };
 
@@ -73,13 +81,12 @@ export const DelegateModal: React.FC<DelegateModalProps> = ({
       return;
     }
 
-    const inputNum = Number(amountInput);
-    if (!hasPositiveAmount || !Number.isFinite(inputNum)) {
+    if (!hasPositiveAmount) {
       setErrorMsg(t('errInvalidAmount'));
       return;
     }
 
-    if (inputNum > availableNum) {
+    if (BigInt(rawAmountInput) > availableRaw) {
       setErrorMsg(t('errExceedsAvailable'));
       return;
     }

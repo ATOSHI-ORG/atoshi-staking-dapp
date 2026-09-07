@@ -19,9 +19,27 @@ export const WalletHeader: React.FC<WalletHeaderProps> = ({
   const { language, setLanguage, t } = useLanguage();
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     if (!address) return;
-    navigator.clipboard.writeText(address);
+
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+      await navigator.clipboard.writeText(address);
+    } catch {
+      // Some wallet WebViews do not expose Clipboard API even though the page
+      // is interactive. Use the browser's legacy copy path as a fallback.
+      const textArea = document.createElement('textarea');
+      textArea.value = address;
+      textArea.setAttribute('readonly', '');
+      textArea.style.position = 'fixed';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.select();
+      const copiedWithFallback = document.execCommand('copy');
+      textArea.remove();
+      if (!copiedWithFallback) return;
+    }
+
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
