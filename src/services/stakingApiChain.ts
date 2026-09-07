@@ -60,7 +60,7 @@ import {
  * 上层 UI 一行都不用改。
  */
 
-import { getAccount, waitForTransactionReceipt, writeContract } from 'wagmi/actions';
+import { getAccount, getGasPrice, waitForTransactionReceipt, writeContract } from 'wagmi/actions';
 import { decodeEventLog, decodeFunctionData, type Hex } from 'viem';
 
 import { EXPLORER_API_URL, atoshi, toBech32, toHex } from '../wallet/chain';
@@ -92,8 +92,20 @@ function requireAccount(): `0x${string}` {
  * 会把泛型塌成约束上界，既丢掉 ABI 的类型检查，又把本该可选的 chain/account
  * 变成必填。让 writeContract 在调用处直接推断才有意义。
  */
-async function sendTx(send: () => Promise<`0x${string}`>): Promise<string> {
-  const hash = await send();
+async function sendTx(send: (gasPrice: bigint) => Promise<`0x${string}`>): Promise<string> {
+  let gasPrice: bigint;
+  try {
+    // JSON-RPC accounts are sent through the injected wallet as
+    // eth_sendTransaction. viem intentionally leaves fee fields for the wallet
+    // to fill, but some wallets (notably OKX on custom networks) fail to do so.
+    // Supplying gasPrice explicitly also makes this a legacy transaction, which
+    // has the widest compatibility across custom EVM networks.
+    gasPrice = await getGasPrice(wagmiConfig, { chainId: atoshi.id });
+  } catch {
+    throw new ChainRestError('无法从 Atoshi RPC 获取 Gas 价格，请检查网络后重试。');
+  }
+
+  const hash = await send(gasPrice);
   const receipt = await waitForTransactionReceipt(wagmiConfig, { hash });
   if (receipt.status !== 'success') {
     throw new ChainRestError(`交易已上链但执行失败（reverted），tx: ${hash}`);
@@ -699,7 +711,7 @@ async function delegate(params: {
   amount: string;
 }): Promise<{ success: boolean; tx_hash: string; message?: string }> {
   const account = delegatorArg(params.delegator);
-  const tx_hash = await sendTx(() =>
+  const tx_hash = await sendTx((gasPrice) =>
     writeContract(wagmiConfig, {
       account,
       chain: atoshi,
@@ -708,6 +720,7 @@ async function delegate(params: {
       functionName: 'delegate',
       args: [account, params.validator, BigInt(params.amount)],
       gas: GAS_LIMITS.delegate,
+      gasPrice,
     }),
   );
   return { success: true, tx_hash };
@@ -719,7 +732,7 @@ async function undelegate(params: {
   amount: string;
 }): Promise<{ success: boolean; tx_hash: string; message?: string }> {
   const account = delegatorArg(params.delegator);
-  const tx_hash = await sendTx(() =>
+  const tx_hash = await sendTx((gasPrice) =>
     writeContract(wagmiConfig, {
       account,
       chain: atoshi,
@@ -728,6 +741,7 @@ async function undelegate(params: {
       functionName: 'undelegate',
       args: [account, params.validator, BigInt(params.amount)],
       gas: GAS_LIMITS.undelegate,
+      gasPrice,
     }),
   );
   return { success: true, tx_hash };
@@ -740,7 +754,7 @@ async function redelegate(params: {
   amount: string;
 }): Promise<{ success: boolean; tx_hash: string; message?: string }> {
   const account = delegatorArg(params.delegator);
-  const tx_hash = await sendTx(() =>
+  const tx_hash = await sendTx((gasPrice) =>
     writeContract(wagmiConfig, {
       account,
       chain: atoshi,
@@ -749,6 +763,7 @@ async function redelegate(params: {
       functionName: 'redelegate',
       args: [account, params.src_validator, params.dst_validator, BigInt(params.amount)],
       gas: GAS_LIMITS.redelegate,
+      gasPrice,
     }),
   );
   return { success: true, tx_hash };
@@ -779,7 +794,7 @@ async function withdrawRewards(params: {
   // 它在预编译内部遍历，一笔交易搞定，不用像 Cosmos 那样为每个验证人发一条消息。
   const single = params.validator;
   const tx_hash = single
-    ? await sendTx(() =>
+    ? await sendTx((gasPrice) =>
         writeContract(wagmiConfig, {
           account,
           chain: atoshi,
@@ -788,9 +803,10 @@ async function withdrawRewards(params: {
           functionName: 'withdrawDelegatorRewards',
           args: [account, single],
           gas: GAS_LIMITS.withdrawRewards,
+          gasPrice,
         }),
       )
-    : await sendTx(() =>
+    : await sendTx((gasPrice) =>
         writeContract(wagmiConfig, {
           account,
           chain: atoshi,
@@ -802,6 +818,7 @@ async function withdrawRewards(params: {
           gas:
             GAS_LIMITS.claimRewardsBase +
             GAS_LIMITS.claimRewardsPerValidator * BigInt(targets.length),
+          gasPrice,
         }),
       );
 

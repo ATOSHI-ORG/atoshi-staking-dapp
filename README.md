@@ -206,11 +206,15 @@ src/
 预编译调用失败时交易照样上链，只是 `status = 'reverted'`。不检查的话 UI 会
 显示「质押成功」而链上什么都没发生。`sendTx` 里统一做了这个检查。
 
-**2. gas 给固定上限，不用估算。**
+**2. gas 给固定上限，不用估算；gas price 从节点读取后显式传给钱包。**
 
 预编译的 `eth_estimateGas` 实测偏低约 2%（链侧已记录为待办事项），偏低会直接
 让交易 out of gas。多给的 gas 不会被扣 —— EVM 只按实际消耗收费。上限见
 `src/wallet/precompiles.ts` 的 `GAS_LIMITS`。
+
+注入式钱包账户最终走 `eth_sendTransaction`，费用字段默认由钱包补齐。MetaMask 在
+自定义网络上可以正常处理，但 OKX 可能直接返回 `Transaction failed`。所以写操作
+会先从 Atoshi RPC 读取 `gasPrice` 并显式传入，以 Legacy 交易兼容各类钱包。
 
 另外页面会校验「UI 上的账户」和「钱包当前账户」是否一致，不一致直接报错 ——
 链上不允许替别人质押，让它在签名前就失败比在链上 revert 好。
