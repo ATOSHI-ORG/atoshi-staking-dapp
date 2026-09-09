@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Clock, AlertTriangle, ArrowRight, Loader2, AlertCircle, Ban } from 'lucide-react';
 import { DelegationItem } from '../../types';
 import { formatCoinAmount, parseHumanAmountToRaw, rawToNumber } from '../../utils/format';
+import { transactionErrorMessage } from '../../utils/transactionError';
 import { useLanguage } from '../../i18n/LanguageContext';
 
 interface UndelegateModalProps {
@@ -90,8 +91,8 @@ export const UndelegateModal: React.FC<UndelegateModalProps> = ({
       const rawAmount = parseHumanAmountToRaw(amountInput);
       await onConfirm(selectedDelegation.validator_address, rawAmount);
       onClose();
-    } catch (err: any) {
-      setErrorMsg(err?.message || t('toastErrorGeneral'));
+    } catch (err: unknown) {
+      setErrorMsg(transactionErrorMessage(err, t));
       setIsSubmitting(false);
     }
   };

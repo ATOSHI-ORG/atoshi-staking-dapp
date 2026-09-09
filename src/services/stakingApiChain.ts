@@ -61,7 +61,7 @@ import {
  */
 
 import { getAccount, getGasPrice, waitForTransactionReceipt, writeContract } from 'wagmi/actions';
-import { decodeEventLog, decodeFunctionData, type Hex } from 'viem';
+import { decodeEventLog, decodeFunctionData, sha256, type Hex } from 'viem';
 
 import { EXPLORER_API_URL, atoshi, toBech32, toHex } from '../wallet/chain';
 import { wagmiConfig } from '../wallet/config';
@@ -525,6 +525,8 @@ async function getAccountAssets(address: string): Promise<AccountAssets> {
 interface ExplorerTransaction {
   hash: string;
   raw_input?: Hex;
+  block_number?: number | null;
+  position?: number | null;
   result?: string | null;
   status?: string | null;
   timestamp?: string | null;
@@ -537,6 +539,13 @@ interface ExplorerLog {
   data?: Hex;
   topics?: Array<Hex | null>;
 }
+
+interface CosmosTxEvent {
+  type?: string;
+  attributes?: Array<{ key?: string; value?: string }>;
+}
+
+const blockTransactionsCache = new Map<number, Promise<string[]>>();
 
 async function explorerGet<T>(path: string, timeoutMs = 12000): Promise<T> {
   const controller = new AbortController();
@@ -591,9 +600,77 @@ function historyRecord(
   };
 }
 
-async function rewardAmountFromLogs(txHash: string): Promise<string> {
+function decodeBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function amountForDenom(coins: string, denom: string): bigint {
+  let total = 0n;
+  for (const coin of coins.split(',')) {
+    const value = coin.trim();
+    if (!value.endsWith(denom)) continue;
+    const amount = value.slice(0, -denom.length);
+    if (/^\d+$/.test(amount)) total += BigInt(amount);
+  }
+  return total;
+}
+
+async function tendermintTxHash(tx: ExplorerTransaction): Promise<string | undefined> {
+  const height = tx.block_number;
+  const position = tx.position;
+  if (!Number.isInteger(height) || !Number.isInteger(position) || height === null || position === null) {
+    return undefined;
+  }
+
+  let blockPromise = blockTransactionsCache.get(height);
+  if (!blockPromise) {
+    blockPromise = restGet<any>(`/cosmos/tx/v1beta1/txs/block/${height}?pagination.limit=100`)
+      .then((response) => response?.block?.data?.txs ?? [])
+      .catch(() => []);
+    blockTransactionsCache.set(height, blockPromise);
+  }
+
+  const encodedTx = (await blockPromise)[position];
+  if (!encodedTx) return undefined;
+  return sha256(decodeBase64(encodedTx)).slice(2).toUpperCase();
+}
+
+async function rewardAmountFromCosmosEvents(tx: ExplorerTransaction): Promise<string | undefined> {
+  const hash = await tendermintTxHash(tx);
+  if (!hash) return undefined;
+
+  const response = await restGet<any>(`/cosmos/tx/v1beta1/txs/${hash}`);
+  const events = (response?.tx_response?.events ?? []) as CosmosTxEvent[];
+  let total = 0n;
+
+  for (const event of events) {
+    if (event.type !== 'withdraw_rewards') continue;
+    for (const attribute of event.attributes ?? []) {
+      if (attribute.key === 'amount' && attribute.value) {
+        total += amountForDenom(attribute.value, ATOX_DENOM);
+      }
+    }
+  }
+
+  return total > 0n ? total.toString() : undefined;
+}
+
+async function rewardAmountFromLogs(tx: ExplorerTransaction): Promise<string> {
   try {
-    const response = await explorerGet<{ items?: ExplorerLog[] }>(`/transactions/${txHash}/logs`);
+    // The EVM ClaimRewards event on the current chain contains the bond-denom
+    // reward, not ATOX. Cosmos withdraw_rewards events contain the full coin list,
+    // so use their aatox values as the authoritative history amount.
+    const amount = await rewardAmountFromCosmosEvents(tx);
+    if (amount !== undefined) return amount;
+  } catch {
+    // Older nodes may not expose block transaction results; fall back to EVM logs.
+  }
+
+  try {
+    const response = await explorerGet<{ items?: ExplorerLog[] }>(`/transactions/${tx.hash}/logs`);
     for (const log of response.items ?? []) {
       if (!log.data || !log.topics) continue;
       const topics = log.topics.filter((topic): topic is Hex => Boolean(topic));
@@ -654,7 +731,7 @@ async function explorerTxToHistory(
     if (target === DISTRIBUTION_PRECOMPILE.toLowerCase()) {
       const decoded = decodeFunctionData({ abi: distributionAbi, data: tx.raw_input });
       const args = decoded.args as readonly unknown[];
-      const amount = await rewardAmountFromLogs(tx.hash);
+      const amount = await rewardAmountFromLogs(tx);
       if (decoded.functionName === 'withdrawDelegatorRewards') {
         return historyRecord(tx, 'withdraw_rewards', amount, 'ATOX', String(args[1]));
       }

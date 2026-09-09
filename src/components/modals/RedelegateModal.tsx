@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, ArrowRightLeft, Zap, AlertTriangle, ArrowRight, Loader2, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { DelegationItem, Validator } from '../../types';
 import { formatCoinAmount, parseHumanAmountToRaw, rawToNumber, formatCommission } from '../../utils/format';
+import { transactionErrorMessage } from '../../utils/transactionError';
 import { useLanguage } from '../../i18n/LanguageContext';
 
 interface RedelegateModalProps {
@@ -110,8 +111,8 @@ export const RedelegateModal: React.FC<RedelegateModalProps> = ({
       const rawAmount = parseHumanAmountToRaw(amountInput);
       await onConfirm(srcValoper, dstValoper, rawAmount);
       onClose();
-    } catch (err: any) {
-      setErrorMsg(err?.message || t('toastErrorGeneral'));
+    } catch (err: unknown) {
+      setErrorMsg(transactionErrorMessage(err, t, t('errRedelegateFailed')));
       setIsSubmitting(false);
     }
   };
@@ -242,7 +243,7 @@ export const RedelegateModal: React.FC<RedelegateModalProps> = ({
                       onClick={() => handleQuickPercent(pct)}
                       className="py-1.5 text-[12px] font-medium bg-[#F1F3F6] hover:bg-gray-200 active:bg-gray-300 text-gray-700 rounded-lg transition-colors"
                     >
-                      {pct === 100 ? t('quickAll') : `${pct}%`}
+                      {pct === 100 ? t('quickAllRedelegate') : `${pct}%`}
                     </button>
                   ))}
                 </div>

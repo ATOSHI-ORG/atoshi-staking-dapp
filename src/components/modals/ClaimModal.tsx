@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Gift, Sparkles, AlertTriangle, Loader2, CheckCircle2, Zap, ArrowRight } from 'lucide-react';
 import { DelegationItem, EnergyAccountData } from '../../types';
 import { formatCoinAmount, rawToNumber } from '../../utils/format';
+import { transactionErrorMessage } from '../../utils/transactionError';
 import { useLanguage } from '../../i18n/LanguageContext';
 
 interface ClaimModalProps {
@@ -55,8 +56,8 @@ export const ClaimModal: React.FC<ClaimModalProps> = ({
     try {
       await onConfirm(isClaimSingle ? targetDelegation.validator_address : undefined);
       onClose();
-    } catch (err: any) {
-      setErrorMsg(err?.message || t('toastErrorGeneral'));
+    } catch (err: unknown) {
+      setErrorMsg(transactionErrorMessage(err, t));
       setIsSubmitting(false);
     }
   };

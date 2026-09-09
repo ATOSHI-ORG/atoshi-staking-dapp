@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, ShieldCheck, Clock, AlertTriangle, ArrowRight, Loader2, CheckCircle2, Zap } from 'lucide-react';
 import { Validator, EnergyAccountData } from '../../types';
 import { formatCoinAmount, parseHumanAmountToRaw, formatCommission, valoperToHex } from '../../utils/format';
+import { transactionErrorMessage } from '../../utils/transactionError';
 import { useLanguage } from '../../i18n/LanguageContext';
 
 interface DelegateModalProps {
@@ -102,8 +103,8 @@ export const DelegateModal: React.FC<DelegateModalProps> = ({
     try {
       await onConfirm(selectedValidator.operator_address, rawAmountInput);
       onClose();
-    } catch (err: any) {
-      setErrorMsg(err?.message || t('toastErrorGeneral'));
+    } catch (err: unknown) {
+      setErrorMsg(transactionErrorMessage(err, t));
       setIsSubmitting(false);
     }
   };

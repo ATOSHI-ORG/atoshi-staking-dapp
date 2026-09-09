@@ -181,6 +181,7 @@ export const translations = {
     totalPendingRewardsToClaim: 'Pending ATOX to claim',
     maxUndelegateAvailable: 'Max withdrawable',
     quickAll: 'All',
+    quickAllRedelegate: 'All',
     maxEntriesLimitReachedTitle: 'Max In-Flight Unbondings Reached (7/7)',
     maxEntriesLimitReachedDesc: 'Under Atoshi Chain rules, a maximum of 7 concurrent unbondings are permitted per validator. Please wait for existing unbondings to complete.',
     hardRules21DaysTitle: '21-Day Lockup (Enforced On-Chain)',
@@ -335,6 +336,13 @@ export const translations = {
     errMaxEntriesReached: 'Maximum 7 in-flight unbonding entries reached for this validator. Please wait for existing unbondings to mature.',
     errSameSrcDst: 'Source and destination validators cannot be the same',
     errNoGasAndNoEnergy: 'Available ATOS is 0 and no free-gas Energy available. Please top up a small amount of ATOS first.',
+    errUserRejected: 'User rejected the transaction',
+    errTransactionFailed: 'Transaction failed. Please check your balance, Gas and validator status, then try again.',
+    errRedelegateFailed: 'Redelegation failed. Please check the source balance, destination validator and 21-day redelegation cooldown, then try again.',
+    errInsufficientFunds: 'Insufficient available balance to complete this transaction.',
+    errOutOfGas: 'The transaction ran out of Gas. Please keep enough ATOS for fees and try again.',
+    errRedelegateCooldown: 'This stake is still within the 21-day redelegation cooldown and cannot be redelegated yet.',
+    errNetworkUnavailable: 'Unable to connect to the wallet or Atoshi network. Please check the network and try again.',
   },
 
   zh: {
@@ -517,6 +525,7 @@ export const translations = {
     totalPendingRewardsToClaim: '累计待领 ATOX',
     maxUndelegateAvailable: '最多可赎回',
     quickAll: '全部赎回',
+    quickAllRedelegate: '全部',
     maxEntriesLimitReachedTitle: '在途解质押笔数已达上限 (7/7)',
     maxEntriesLimitReachedDesc: '根据 Atoshi 链上规则（max_entries = 7），同一验证人最多同时存在 7 笔在途解绑。请等待已有解质押到账后再发起。',
     hardRules21DaysTitle: '21 天解绑锁定期（链上硬性规则）',
@@ -671,6 +680,13 @@ export const translations = {
     errMaxEntriesReached: '该验证人当前在途解质押笔数已达上限 (7 笔)，请等待已有笔数到账后再发起',
     errSameSrcDst: '源验证人与目标验证人不能相同',
     errNoGasAndNoEnergy: 'ATOS 可用余额为 0 且无免 Gas 能量额度，无法发起交易，请先充值少量 ATOS',
+    errUserRejected: '用户拒绝交易',
+    errTransactionFailed: '交易执行失败，请确认余额、Gas 和验证人状态后重试',
+    errRedelegateFailed: '转委托失败，请确认源委托余额、目标验证人状态及 21 天转委托冷却限制后重试',
+    errInsufficientFunds: '可用余额不足，无法完成本次交易',
+    errOutOfGas: '交易 Gas 不足，请预留足够的 ATOS 手续费后重试',
+    errRedelegateCooldown: '该笔质押仍处于 21 天转委托冷却期，暂时无法再次转委托',
+    errNetworkUnavailable: '无法连接钱包或 Atoshi 网络，请检查网络后重试',
   }
 } as const;
 
