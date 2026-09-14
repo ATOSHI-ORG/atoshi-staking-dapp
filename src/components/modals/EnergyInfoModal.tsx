@@ -116,7 +116,8 @@ export const EnergyInfoModal: React.FC<EnergyInfoModalProps> = ({
             <ul className="list-disc pl-4 space-y-1">
               <li>{t('energyRulesDesc1')}</li>
               <li>{t('energyRulesDesc2')}</li>
-              <li>{t('energyRulesDesc3')}</li>
+              <li className="text-amber-700 font-medium">{t('energyRulesDesc3')}</li>
+              <li>{t('energyRulesDesc4')}</li>
             </ul>
           </div>
         </div>

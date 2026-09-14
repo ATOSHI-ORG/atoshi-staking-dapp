@@ -55,11 +55,17 @@ export const ClaimModal: React.FC<ClaimModalProps> = ({
   const wantConvert = convert && canConvert;
 
   const availableNum = rawToNumber(availableAtos);
-  const isZeroGasAndNoEnergy = availableNum <= 0 && !energyData.qualifies_for_energy;
+  // 能量不看 —— 这个页面发的是 EVM 交易，链上的能量抵扣只挂在 Cosmos 的 ante
+  // 链上（x/energy/ante/decorator.go：「Scope (v1): Cosmos chain only」），EVM
+  // 走的是 MonoDecorator，那条链里没有能量这一环。达标的用户在这里照样付 ATOS。
+  //
+  // 之前这里是 `availableNum <= 0 && !qualifies_for_energy`，于是余额为 0 但能量
+  // 达标的用户能把按钮点亮，然后交易必然失败。
+  const isZeroGas = availableNum <= 0;
 
   const handleSubmit = async () => {
-    if (isZeroGasAndNoEnergy) {
-      setErrorMsg(t('errNoGasAndNoEnergy'));
+    if (isZeroGas) {
+      setErrorMsg(t('errNoGas'));
       return;
     }
 
@@ -137,15 +143,20 @@ export const ClaimModal: React.FC<ClaimModalProps> = ({
 
             <div className="flex justify-between py-1 text-gray-500 border-b border-[#F0F2F5]">
               <span>{t('claimGasDesc')}</span>
-              {energyData.qualifies_for_energy ? (
-                <span className="text-emerald-600 font-medium flex items-center gap-1">
-                  <Zap className="w-3.5 h-3.5 fill-emerald-500" />
-                  {t('claimGasFree')}
-                </span>
-              ) : (
-                <span className="font-mono text-gray-800 font-medium">≈ 0.0050 ATOS</span>
-              )}
+              <span className="font-mono text-gray-800 font-medium">≈ 0.0050 ATOS</span>
             </div>
+
+            {/*
+              能量达标的用户会问「我不是免 Gas 吗」。在这里解释一次，比让他
+              对着扣掉的 ATOS 猜强 —— 能量是真的，只是抵扣不了网页端发的
+              EVM 交易。
+            */}
+            {energyData.qualifies_for_energy && (
+              <div className="flex items-start gap-1.5 py-1 text-[11px] text-gray-500 leading-relaxed">
+                <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0 mt-px" />
+                <span>{t('energyNotAppliedHere')}</span>
+              </div>
+            )}
 
             <div className="flex justify-between py-1 text-gray-500">
               <span>{t('currentAvailableAtos')}</span>
@@ -156,7 +167,7 @@ export const ClaimModal: React.FC<ClaimModalProps> = ({
           </div>
 
           {/* Gas warning if zero */}
-          {isZeroGasAndNoEnergy && (
+          {isZeroGas && (
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-[12px] flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
               <div>
@@ -232,7 +243,7 @@ export const ClaimModal: React.FC<ClaimModalProps> = ({
           <button
             type="button"
             id="claim-submit-btn"
-            disabled={isSubmitting || BigInt(rewardAmountToClaim || '0') <= 0n || isZeroGasAndNoEnergy}
+            disabled={isSubmitting || BigInt(rewardAmountToClaim || '0') <= 0n || isZeroGas}
             onClick={handleSubmit}
             className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-medium rounded-xl text-[14px] transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
           >
