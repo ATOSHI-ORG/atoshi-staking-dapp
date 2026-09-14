@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Gift, Sparkles, AlertTriangle, Loader2, CheckCircle2, Zap, ArrowRight } from 'lucide-react';
+import { X, Gift, Sparkles, AlertTriangle, Loader2, CheckCircle2, Zap, ArrowRight, Repeat } from 'lucide-react';
 import { DelegationItem, EnergyAccountData } from '../../types';
 import { formatCoinAmount, rawToNumber } from '../../utils/format';
 import { transactionErrorMessage } from '../../utils/transactionError';
@@ -12,7 +12,12 @@ interface ClaimModalProps {
   allDelegations: DelegationItem[];
   availableAtos: string;
   energyData: EnergyAccountData;
-  onConfirm: (validatorValoper?: string) => Promise<void>;
+  /**
+   * 现在能兑换成 ATOS 的额度（liao）。为 0 时兑换选项不可勾选 —— 链上
+   * claim() 在没有额度时是 revert，勾了也只会得到一个「交易失败」。
+   */
+  convertibleAtos: string;
+  onConfirm: (validatorValoper: string | undefined, convert: boolean) => Promise<void>;
 }
 
 export const ClaimModal: React.FC<ClaimModalProps> = ({
@@ -22,11 +27,13 @@ export const ClaimModal: React.FC<ClaimModalProps> = ({
   allDelegations,
   availableAtos,
   energyData,
+  convertibleAtos,
   onConfirm,
 }) => {
   const { t } = useLanguage();
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [convert, setConvert] = useState<boolean>(false);
 
   if (!isOpen) return null;
 
@@ -41,6 +48,12 @@ export const ClaimModal: React.FC<ClaimModalProps> = ({
     ? targetDelegation.pending_reward_atox
     : totalPendingAtoxRaw.toString();
 
+  const convertibleRaw = BigInt(convertibleAtos || '0');
+  const canConvert = convertibleRaw > 0n;
+  // 额度在弹窗打开期间可能被 Tier 释放改成 0（或用户在钱包里单独兑换过），
+  // 勾选状态不能留着 —— 否则会发出一笔必然 revert 的交易。
+  const wantConvert = convert && canConvert;
+
   const availableNum = rawToNumber(availableAtos);
   const isZeroGasAndNoEnergy = availableNum <= 0 && !energyData.qualifies_for_energy;
 
@@ -54,7 +67,7 @@ export const ClaimModal: React.FC<ClaimModalProps> = ({
     setErrorMsg(null);
 
     try {
-      await onConfirm(isClaimSingle ? targetDelegation.validator_address : undefined);
+      await onConfirm(isClaimSingle ? targetDelegation.validator_address : undefined, wantConvert);
       onClose();
     } catch (err: unknown) {
       setErrorMsg(transactionErrorMessage(err, t));
@@ -153,6 +166,46 @@ export const ClaimModal: React.FC<ClaimModalProps> = ({
             </div>
           )}
 
+          {/* 兑换选项 */}
+          <label
+            className={`flex items-start gap-3 p-3.5 rounded-xl border transition-colors ${
+              canConvert
+                ? 'bg-white border-[#E5E7EB] hover:border-blue-300 cursor-pointer'
+                : 'bg-gray-50 border-[#EEF2F6] cursor-not-allowed'
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={wantConvert}
+              disabled={!canConvert || isSubmitting}
+              onChange={(e) => setConvert(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-blue-600 disabled:opacity-40"
+            />
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="flex items-center gap-1.5 text-[13px] font-semibold text-gray-900">
+                <Repeat className={`w-3.5 h-3.5 ${canConvert ? 'text-blue-600' : 'text-gray-400'}`} />
+                <span>{t('convertOptionLabel')}</span>
+              </div>
+              {canConvert ? (
+                <>
+                  <div className="flex items-center gap-1.5 text-[12px] text-gray-500">
+                    <span>{t('convertOptionAmount')}</span>
+                    <span className="font-mono font-semibold text-gray-900">
+                      {formatCoinAmount(convertibleAtos)} ATOS
+                    </span>
+                  </div>
+                  {wantConvert && (
+                    <p className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 leading-relaxed">
+                      {t('convertTwoTxNote')}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <div className="text-[12px] text-gray-500">{t('convertOptionNone')}</div>
+              )}
+            </div>
+          </label>
+
           {/* Educational Note */}
           <div className="bg-blue-50/70 p-3.5 rounded-xl border border-blue-200 text-blue-900 text-[12px] space-y-1">
             <span className="font-bold flex items-center gap-1.5 text-blue-800">
@@ -191,7 +244,7 @@ export const ClaimModal: React.FC<ClaimModalProps> = ({
             ) : (
               <>
                 <Gift className="w-4 h-4" />
-                <span>{t('btnConfirmClaim')}</span>
+                <span>{wantConvert ? t('btnConfirmClaimAndConvert') : t('btnConfirmClaim')}</span>
               </>
             )}
           </button>

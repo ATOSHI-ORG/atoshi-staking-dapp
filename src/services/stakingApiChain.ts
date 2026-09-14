@@ -60,15 +60,23 @@ import {
  * 上层 UI 一行都不用改。
  */
 
-import { getAccount, getGasPrice, waitForTransactionReceipt, writeContract } from 'wagmi/actions';
+import {
+  getAccount,
+  getGasPrice,
+  readContract,
+  waitForTransactionReceipt,
+  writeContract,
+} from 'wagmi/actions';
 import { decodeEventLog, decodeFunctionData, sha256, type Hex } from 'viem';
 
 import { EXPLORER_API_URL, atoshi, toBech32, toHex } from '../wallet/chain';
 import { wagmiConfig } from '../wallet/config';
 import {
+  ATOX_PRECOMPILE,
   DISTRIBUTION_PRECOMPILE,
   GAS_LIMITS,
   STAKING_PRECOMPILE,
+  atoxAbi,
   distributionAbi,
   stakingAbi,
 } from '../wallet/precompiles';
@@ -902,6 +910,71 @@ async function withdrawRewards(params: {
   return { success: true, tx_hash, total_claimed_atox: claimed.toString() };
 }
 
+/* ────────────────────────────── ATOX → ATOS 兑换 ────────────────────────────── */
+
+/**
+ * 现在能兑换多少 ATOS（liao）。
+ *
+ * 走 EVM 而不是 REST：这个数字决定按钮能不能点、以及点下去会不会 revert，
+ * 必须和 claim() 看到的是同一个状态。REST 那条（getAtoxAccount 的 pending_atos）
+ * 是同一个值，但走的是另一个节点端点，在 Tier 释放的那一瞬间可能不一致。
+ *
+ * 查不到就返回 0 —— 让「兑换」保持不可勾选，而不是让用户签一笔必然失败的交易。
+ */
+async function getAtoxClaimable(address: string): Promise<string> {
+  try {
+    const amount = await readContract(wagmiConfig, {
+      chainId: atoshi.id,
+      address: ATOX_PRECOMPILE,
+      abi: atoxAbi,
+      functionName: 'claimable',
+      args: [toHex(address)],
+      // viem 2.5x 把 EIP-7702 的 authorizationList 标成了必填（联合类型塌陷，
+      // 不是真需要它，运行时被忽略）。不带这一项通不过类型检查。
+      authorizationList: undefined,
+    });
+    return (amount as bigint).toString();
+  } catch (error) {
+    console.error('Failed to read ATOX claimable', error);
+    return '0';
+  }
+}
+
+/**
+ * 把可兑换的 ATOX 换成 ATOS，1:1，同时销毁等量 ATOX。
+ *
+ * 这是**独立的一笔交易**，和领取质押奖励分开签。链上 claim() 只认签名者本人，
+ * 没法由别的合约代发，所以合不成一笔。UI 上把两步放在一个按钮后面，但用户会
+ * 看到两次钱包弹窗 —— 这一点必须在界面上讲清楚，不然第二次弹窗会被当成异常。
+ */
+async function convertAtox(params: {
+  delegator: string;
+}): Promise<{ success: boolean; tx_hash: string; converted_atos: string }> {
+  const account = delegatorArg(params.delegator);
+
+  // 广播前先记下额度：交易成功后再读会是 0。另外没有额度时链上是 revert 不是
+  // 返回 0，先查一次能把「没得换」和「交易失败」分开。
+  const claimable = await getAtoxClaimable(params.delegator);
+  if (BigInt(claimable) <= 0n) {
+    return { success: false, tx_hash: '', converted_atos: '0' };
+  }
+
+  const tx_hash = await sendTx((gasPrice) =>
+    writeContract(wagmiConfig, {
+      account,
+      chain: atoshi,
+      address: ATOX_PRECOMPILE,
+      abi: atoxAbi,
+      functionName: 'claim',
+      args: [],
+      gas: GAS_LIMITS.claimAtox,
+      gasPrice,
+    }),
+  );
+
+  return { success: true, tx_hash, converted_atos: claimable };
+}
+
 export const StakingApiChain = {
   getParams,
   getValidators,
@@ -917,4 +990,6 @@ export const StakingApiChain = {
   undelegate,
   redelegate,
   withdrawRewards,
+  getAtoxClaimable,
+  convertAtox,
 };

@@ -124,4 +124,69 @@ export const GAS_LIMITS = {
   /** claimRewards 遍历 N 个验证人，按个数递增 */
   claimRewardsBase: 300_000n,
   claimRewardsPerValidator: 250_000n,
+  /**
+   * ATOX 兑换。结算只动一个账户的 index 和余额，比遍历验证人便宜得多，
+   * 但仍按预编译的惯例给固定上限（estimateGas 对预编译偏低约 2%）。
+   */
+  claimAtox: 400_000n,
 } as const;
+
+/**
+ * ATOX 兑换预编译（链上 precompiles/atox，地址 0x…0809）。
+ *
+ * 为什么单独一个预编译而不是挂在 distribution 上：兑换和领取奖励是两件事 ——
+ * 奖励是 ATOX 进账，兑换是把手里**任意来源**的 ATOX（包括桥进来的、别人转的）
+ * 按 1:1 换成 ATOS 并销毁等量 ATOX。钱包侧也要单独接这个口，不能只在质押页里有。
+ *
+ * 授权模型：claim() 只给签名者本人兑换，合约不能替别人兑。所以这一步必须由
+ * 用户自己签一笔交易，没法和领取奖励合成一笔 —— UI 上是一个按钮，链上是两笔。
+ *
+ * claim() 在没有可兑换额度时是 **revert** 而不是返回 0。所以调用前必须先用
+ * claimable() 判断，否则用户会看到一个莫名其妙的「交易失败」。
+ */
+export const ATOX_PRECOMPILE = '0x0000000000000000000000000000000000000809' as const;
+
+export const atoxAbi = [
+  {
+    type: 'event',
+    name: 'ClaimAtos',
+    inputs: [
+      { name: 'claimer', type: 'address', indexed: true },
+      { name: 'atosPaid', type: 'uint256', indexed: false },
+      { name: 'atoxBurned', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    // 把可兑换的 ATOX 全部换成 ATOS。没有额度会 revert。
+    type: 'function',
+    name: 'claim',
+    stateMutability: 'nonpayable',
+    inputs: [],
+    outputs: [{ name: 'atosPaid', type: 'uint256' }],
+  },
+  {
+    // 现在能换到多少 ATOS（= 已结算待领 + 本次读取时才算出来的未结算部分）。
+    // 这个数字会随 Tier 释放增长，不是快照。
+    type: 'function',
+    name: 'claimable',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: 'amount', type: 'uint256' }],
+  },
+  {
+    // 下次结算会销毁多少 ATOX。兑换是 1:1 且销毁等量，所以这是「要花掉的 ATOX」。
+    type: 'function',
+    name: 'burnOnSettle',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: 'amount', type: 'uint256' }],
+  },
+  {
+    // 全局释放进度，1e18 定点。账户 index 落后于它的部分就是能兑换的额度。
+    type: 'function',
+    name: 'globalIndex',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: 'index', type: 'uint256' }],
+  },
+] as const;

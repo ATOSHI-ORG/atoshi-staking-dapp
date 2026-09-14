@@ -772,6 +772,58 @@ export const StakingApiMock = {
     return { success: true, tx_hash: txHash, total_claimed_atox: claimedAtox.toString() };
   },
 
+  // eth_call atox.claimable(address)
+  async getAtoxClaimable(_address: string = USER_ADDRESS): Promise<string> {
+    await new Promise((r) => setTimeout(r, 120));
+    return currentState.atox_account.pending_atos;
+  },
+
+  // POST atox.claim() —— 独立的一笔交易，和领取奖励分开签
+  async convertAtox(_params: { delegator: string }): Promise<{
+    success: boolean;
+    tx_hash: string;
+    converted_atos: string;
+  }> {
+    await new Promise((r) => setTimeout(r, 600));
+
+    const acct = currentState.atox_account;
+    const converted = BigInt(acct.pending_atos);
+    if (converted <= 0n) {
+      return { success: false, tx_hash: '', converted_atos: '0' };
+    }
+
+    // 1:1 换成 ATOS，并销毁等量 ATOX —— 链上就是这么做的，mock 不能只加不减，
+    // 否则拿 mock 调 UI 时会看不出「ATOX 余额变少了」这件事。
+    acct.pending_atos = '0';
+    acct.atox_balance = (BigInt(acct.atox_balance) - converted).toString();
+    if (BigInt(acct.atox_balance) < 0n) acct.atox_balance = '0';
+    acct.cumulative_converted_atos = (
+      BigInt(acct.cumulative_converted_atos) + converted
+    ).toString();
+    currentState.available_atos = (
+      BigInt(currentState.available_atos) + converted
+    ).toString();
+
+    const txHash =
+      '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+
+    currentState.tx_history.unshift({
+      id: 'tx_' + Date.now(),
+      tx_hash: txHash,
+      type: 'withdraw_rewards',
+      amount: converted.toString(),
+      denom: 'ATOS',
+      timestamp: Date.now(),
+      status: 'success',
+      fee_atos: '0',
+      is_free_gas: true,
+      energy_consumed: 60,
+    });
+
+    saveState(currentState);
+    return { success: true, tx_hash: txHash, converted_atos: converted.toString() };
+  },
+
   // Reset to initial demo data
   resetDemoData() {
     localStorage.removeItem(STORAGE_KEY);

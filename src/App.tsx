@@ -16,6 +16,7 @@ import { DelegateModal } from './components/modals/DelegateModal';
 import { UndelegateModal } from './components/modals/UndelegateModal';
 import { RedelegateModal } from './components/modals/RedelegateModal';
 import { ClaimModal } from './components/modals/ClaimModal';
+import { transactionErrorMessage } from './utils/transactionError';
 import { AtoxInfoModal } from './components/modals/AtoxInfoModal';
 import { SlashingRulesModal } from './components/modals/SlashingRulesModal';
 import { ValidatorDetailModal } from './components/modals/ValidatorDetailModal';
@@ -266,18 +267,47 @@ export default function App() {
     );
   };
 
-  const handleConfirmWithdrawRewards = async (validatorValoper?: string) => {
+  /**
+   * 领取奖励，可选顺带把已解锁的 ATOX 兑换成 ATOS。
+   *
+   * 链上是**两笔**交易：领取走 distribution 预编译，兑换走 atox 预编译，
+   * 后者只认签名者本人、没法由前一笔代发。所以这里是先后两次签名。
+   *
+   * 兑换失败不往外抛：那时奖励已经上链领到了，把错误抛给弹窗会让它停在
+   * 「领取失败」的状态，用户多半会再点一次 —— 而再领一次是领不到的。
+   * 改成领取照常报成功，兑换单独给一条错误提示，用户可以稍后单独重试。
+   */
+  const handleConfirmWithdrawRewards = async (
+    validatorValoper: string | undefined,
+    convert: boolean,
+  ) => {
     if (!userAddress) throw new Error(t('walletConnectHint'));
     const res = await StakingApi.withdrawRewards({
       delegator: userAddress,
       validator: validatorValoper,
     });
-    await loadData();
     addToast(
       'success',
       t('toastSuccessClaim'),
       `${formatCoinAmount(res.total_claimed_atox)} ATOX`
     );
+
+    if (convert) {
+      try {
+        const conv = await StakingApi.convertAtox({ delegator: userAddress });
+        if (conv.success) {
+          addToast(
+            'success',
+            t('toastSuccessConvert'),
+            `${formatCoinAmount(conv.converted_atos)} ATOS`
+          );
+        }
+      } catch (err: unknown) {
+        addToast('error', t('toastConvertFailedTitle'), transactionErrorMessage(err, t));
+      }
+    }
+
+    await loadData();
   };
 
   return (
@@ -469,6 +499,7 @@ export default function App() {
           allDelegations={delegations}
           availableAtos={assets.available_atos}
           energyData={energyData}
+          convertibleAtos={atoxAccount.pending_atos}
           onConfirm={handleConfirmWithdrawRewards}
         />
 
