@@ -22,6 +22,11 @@ export const LanguageProvider: React.FC<{ children: ReactNode }> = ({ children }
     return 'en'; // Default is English
   });
 
+  useEffect(() => {
+    document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en';
+    document.title = language === 'zh' ? 'Atoshi 质押' : 'Atoshi Staking';
+  }, [language]);
+
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
     localStorage.setItem(STORAGE_KEY, lang);
