@@ -80,6 +80,8 @@ import {
   distributionAbi,
   stakingAbi,
 } from '../wallet/precompiles';
+import { isCosmosTxHash, isEvmTxHash, waitForCosmosTx } from './cosmosTx';
+import { broadcastCosmos, coin, getCosmosProvider } from '../wallet/cosmos';
 
 /** 当前已连接的 0x 地址；没连钱包就抛出能看懂的错误。 */
 function requireAccount(): `0x${string}` {
@@ -100,7 +102,7 @@ function requireAccount(): `0x${string}` {
  * 会把泛型塌成约束上界，既丢掉 ABI 的类型检查，又把本该可选的 chain/account
  * 变成必填。让 writeContract 在调用处直接推断才有意义。
  */
-async function sendTx(send: (gasPrice: bigint) => Promise<`0x${string}`>): Promise<string> {
+async function sendTx(send: (gasPrice: bigint) => Promise<string>): Promise<string> {
   let gasPrice: bigint;
   try {
     // JSON-RPC accounts are sent through the injected wallet as
@@ -113,7 +115,15 @@ async function sendTx(send: (gasPrice: bigint) => Promise<`0x${string}`>): Promi
     throw new ChainRestError('无法从 Atoshi RPC 获取 Gas 价格，请检查网络后重试。');
   }
 
-  const hash = await send(gasPrice);
+  const hash = String(await send(gasPrice));
+  if (isCosmosTxHash(hash)) {
+    await waitForCosmosTx(hash);
+    return hash;
+  }
+  if (!isEvmTxHash(hash)) {
+    throw new ChainRestError(`钱包返回了无法识别的交易哈希: ${hash}`);
+  }
+
   const receipt = await waitForTransactionReceipt(wagmiConfig, { hash });
   if (receipt.status !== 'success') {
     throw new ChainRestError(`交易已上链但执行失败（reverted），tx: ${hash}`);
@@ -553,6 +563,20 @@ interface CosmosTxEvent {
   attributes?: Array<{ key?: string; value?: string }>;
 }
 
+interface CosmosHistoryTx {
+  tx_response?: {
+    txhash?: string;
+    code?: number | string;
+    raw_log?: string;
+    timestamp?: string;
+    events?: CosmosTxEvent[];
+    tx?: {
+      body?: { messages?: Array<Record<string, any>> };
+      auth_info?: { fee?: { amount?: Array<{ denom?: string; amount?: string }> } };
+    };
+  };
+}
+
 const blockTransactionsCache = new Map<number, Promise<string[]>>();
 
 async function explorerGet<T>(path: string, timeoutMs = 12000): Promise<T> {
@@ -754,23 +778,116 @@ async function explorerTxToHistory(
   return null;
 }
 
+function cosmosHistoryRecord(
+  tx: CosmosHistoryTx['tx_response'],
+  hash: string,
+  type: StakingTxHistory['type'],
+  amount: string,
+  denom: StakingTxHistory['denom'],
+  validatorAddress?: string,
+  dstValidatorAddress?: string,
+  index = 0,
+): StakingTxHistory {
+  const fee = (tx?.tx?.auth_info?.fee?.amount ?? [])
+    .filter((coin) => coin.denom === BOND_DENOM)
+    .reduce((sum, coin) => sum + BigInt(coin.amount ?? '0'), 0n)
+    .toString();
+  return {
+    id: `${hash}:${index}`,
+    tx_hash: hash,
+    type,
+    amount,
+    denom,
+    validator_address: validatorAddress,
+    dst_validator_address: dstValidatorAddress,
+    timestamp: tx?.timestamp ? Date.parse(tx.timestamp) : Date.now(),
+    status: Number(tx?.code ?? 0) === 0 ? 'success' : 'failed',
+    fee_atos: fee,
+    is_free_gas: fee === '0',
+  };
+}
+
+function cosmosMessageType(message: Record<string, any>): string {
+  return String(message['@type'] ?? message.type_url ?? message.typeUrl ?? '');
+}
+
+function cosmosMessageValue(message: Record<string, any>): Record<string, any> {
+  return (message.value ?? message) as Record<string, any>;
+}
+
+function cosmosEventAmount(tx: CosmosHistoryTx['tx_response'], eventType: string, denom: string): string {
+  let total = 0n;
+  for (const event of tx?.events ?? []) {
+    if (event.type !== eventType) continue;
+    for (const attribute of event.attributes ?? []) {
+      if (attribute.key === 'amount' && attribute.value) {
+        total += amountForDenom(attribute.value, denom);
+      }
+    }
+  }
+  return total.toString();
+}
+
+async function getCosmosHistory(address: string): Promise<StakingTxHistory[]> {
+  const sender = toBech32(address);
+  const query = encodeURIComponent(`message.sender='${sender}'`);
+  try {
+    const response = await restGet<{ tx_responses?: CosmosHistoryTx['tx_response'][] }>(
+      `/cosmos/tx/v1beta1/txs?query=${query}&pagination.limit=100`,
+    );
+    const rows: StakingTxHistory[] = [];
+    for (const tx of response.tx_responses ?? []) {
+      const hash = tx?.txhash;
+      if (!hash) continue;
+      (tx.tx?.body?.messages ?? []).forEach((message, index) => {
+        const type = cosmosMessageType(message);
+        const value = cosmosMessageValue(message);
+        const amount = String(value.amount?.amount ?? value.amount ?? '0');
+        const denom = String(value.amount?.denom ?? BOND_DENOM) === ATOX_DENOM ? 'ATOX' : 'ATOS';
+        if (type.endsWith('MsgDelegate')) {
+          rows.push(cosmosHistoryRecord(tx, hash, 'delegate', amount, 'ATOS', value.validator_address ?? value.validatorAddress, undefined, index));
+        } else if (type.endsWith('MsgUndelegate')) {
+          rows.push(cosmosHistoryRecord(tx, hash, 'undelegate', amount, 'ATOS', value.validator_address ?? value.validatorAddress, undefined, index));
+        } else if (type.endsWith('MsgBeginRedelegate')) {
+          rows.push(cosmosHistoryRecord(tx, hash, 'redelegate', amount, 'ATOS', value.validator_src_address ?? value.validatorSrcAddress, value.validator_dst_address ?? value.validatorDstAddress, index));
+        } else if (type.endsWith('MsgWithdrawDelegatorReward')) {
+          rows.push(cosmosHistoryRecord(
+            tx,
+            hash,
+            'withdraw_rewards',
+            cosmosEventAmount(tx, 'withdraw_rewards', ATOX_DENOM),
+            'ATOX',
+            value.validator_address ?? value.validatorAddress,
+            undefined,
+            index,
+          ));
+        }
+      });
+    }
+    return rows;
+  } catch (error) {
+    console.warn('Cosmos staking history unavailable', error);
+    return [];
+  }
+}
+
 /** Load and decode staking precompile calls indexed by Blockscout. */
 async function getHistory(address: string): Promise<StakingTxHistory[]> {
   const account = toHex(address);
+  let evmRows: StakingTxHistory[] = [];
   try {
     const response = await explorerGet<{ items?: ExplorerTransaction[] }>(
       `/addresses/${account}/transactions`,
     );
-    const rows = await Promise.all(
+    evmRows = (await Promise.all(
       (response.items ?? []).map((tx) => explorerTxToHistory(tx, account)),
-    );
-    return rows
-      .filter((tx): tx is StakingTxHistory => tx !== null)
-      .sort((a, b) => b.timestamp - a.timestamp);
+    )).filter((tx): tx is StakingTxHistory => tx !== null);
   } catch (error) {
-    console.error('Failed to load staking transaction history', error);
-    return [];
+    console.warn('EVM staking history unavailable', error);
   }
+
+  const cosmosRows = await getCosmosHistory(address);
+  return [...evmRows, ...cosmosRows].sort((a, b) => b.timestamp - a.timestamp);
 }
 
 /* ────────────────────────────── 写操作（走 EVM 预编译） ────────────────────────────── */
@@ -790,11 +907,34 @@ function delegatorArg(delegator: string): `0x${string}` {
   return connected;
 }
 
+/** Native Cosmos write path. A missing provider returns null so the EVM path
+ * below remains the default for existing wallets. */
+async function cosmosWrite(
+  delegator: string,
+  messages: Array<{ typeUrl: string; value: Record<string, unknown> }>,
+): Promise<string | null> {
+  if (!getCosmosProvider()) return null;
+  const sender = toBech32(delegator);
+  const sent = await broadcastCosmos(messages, sender);
+  await waitForCosmosTx(sent.txHash);
+  return sent.txHash;
+}
+
 async function delegate(params: {
   delegator: string;
   validator: string;
   amount: string;
 }): Promise<{ success: boolean; tx_hash: string; message?: string }> {
+  const cosmosTx = await cosmosWrite(params.delegator, [{
+    typeUrl: '/cosmos.staking.v1beta1.MsgDelegate',
+    value: {
+      delegatorAddress: toBech32(params.delegator),
+      validatorAddress: params.validator,
+      amount: coin(params.amount, BOND_DENOM),
+    },
+  }]);
+  if (cosmosTx) return { success: true, tx_hash: cosmosTx };
+
   const account = delegatorArg(params.delegator);
   const tx_hash = await sendTx((gasPrice) =>
     writeContract(wagmiConfig, {
@@ -816,6 +956,16 @@ async function undelegate(params: {
   validator: string;
   amount: string;
 }): Promise<{ success: boolean; tx_hash: string; message?: string }> {
+  const cosmosTx = await cosmosWrite(params.delegator, [{
+    typeUrl: '/cosmos.staking.v1beta1.MsgUndelegate',
+    value: {
+      delegatorAddress: toBech32(params.delegator),
+      validatorAddress: params.validator,
+      amount: coin(params.amount, BOND_DENOM),
+    },
+  }]);
+  if (cosmosTx) return { success: true, tx_hash: cosmosTx };
+
   const account = delegatorArg(params.delegator);
   const tx_hash = await sendTx((gasPrice) =>
     writeContract(wagmiConfig, {
@@ -838,6 +988,17 @@ async function redelegate(params: {
   dst_validator: string;
   amount: string;
 }): Promise<{ success: boolean; tx_hash: string; message?: string }> {
+  const cosmosTx = await cosmosWrite(params.delegator, [{
+    typeUrl: '/cosmos.staking.v1beta1.MsgBeginRedelegate',
+    value: {
+      delegatorAddress: toBech32(params.delegator),
+      validatorSrcAddress: params.src_validator,
+      validatorDstAddress: params.dst_validator,
+      amount: coin(params.amount, BOND_DENOM),
+    },
+  }]);
+  if (cosmosTx) return { success: true, tx_hash: cosmosTx };
+
   const account = delegatorArg(params.delegator);
   const tx_hash = await sendTx((gasPrice) =>
     writeContract(wagmiConfig, {
@@ -858,8 +1019,6 @@ async function withdrawRewards(params: {
   delegator: string;
   validator?: string;
 }): Promise<{ success: boolean; tx_hash: string; total_claimed_atox: string }> {
-  const account = delegatorArg(params.delegator);
-
   // 广播前先记下待领金额。广播后再查会拿到 0（已经领完了），
   // 而 UI 要用这个数字提示「领取了多少 ATOX」。
   const delegations = await getDelegations(params.delegator);
@@ -874,6 +1033,22 @@ async function withdrawRewards(params: {
   const claimed = delegations
     .filter((d) => targets.includes(d.validator_address))
     .reduce((sum, d) => sum + BigInt(d.pending_reward_atox), 0n);
+
+  if (getCosmosProvider()) {
+    const cosmosTx = await cosmosWrite(
+      params.delegator,
+      targets.map((validator) => ({
+        typeUrl: '/cosmos.distribution.v1beta1.MsgWithdrawDelegatorReward',
+        value: {
+          delegatorAddress: toBech32(params.delegator),
+          validatorAddress: validator,
+        },
+      })),
+    );
+    if (cosmosTx) return { success: true, tx_hash: cosmosTx, total_claimed_atox: claimed.toString() };
+  }
+
+  const account = delegatorArg(params.delegator);
 
   // 单个验证人用 withdrawDelegatorRewards；「全部领取」用 claimRewards ——
   // 它在预编译内部遍历，一笔交易搞定，不用像 Cosmos 那样为每个验证人发一条消息。
@@ -922,6 +1097,14 @@ async function withdrawRewards(params: {
  * 查不到就返回 0 —— 让「兑换」保持不可勾选，而不是让用户签一笔必然失败的交易。
  */
 async function getAtoxClaimable(address: string): Promise<string> {
+  if (getCosmosProvider()) {
+    try {
+      return (await getAtoxAccount(toBech32(address))).pending_atos;
+    } catch {
+      return '0';
+    }
+  }
+
   try {
     const amount = await readContract(wagmiConfig, {
       chainId: atoshi.id,
@@ -950,6 +1133,18 @@ async function getAtoxClaimable(address: string): Promise<string> {
 async function convertAtox(params: {
   delegator: string;
 }): Promise<{ success: boolean; tx_hash: string; converted_atos: string }> {
+  if (getCosmosProvider()) {
+    const claimable = (await getAtoxAccount(toBech32(params.delegator))).pending_atos;
+    if (BigInt(claimable) <= 0n) {
+      return { success: false, tx_hash: '', converted_atos: '0' };
+    }
+    const cosmosTx = await cosmosWrite(params.delegator, [{
+      typeUrl: '/atoshi.atox.v1.MsgClaimAtos',
+      value: { claimer: toBech32(params.delegator) },
+    }]);
+    if (cosmosTx) return { success: true, tx_hash: cosmosTx, converted_atos: claimable };
+  }
+
   const account = delegatorArg(params.delegator);
 
   // 广播前先记下额度：交易成功后再读会是 0。另外没有额度时链上是 revert 不是

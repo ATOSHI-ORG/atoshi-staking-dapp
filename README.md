@@ -56,7 +56,7 @@ Tier 释放条件达成时，链上会把一批 ATOS 注入「ATOX↔ATOS 兑换
 
 ---
 
-## 架构：读走 REST，写走 EVM 预编译
+## 架构：读走 REST，写支持 EVM 与 Cosmos
 
 这是这个项目最需要先看懂的一点。
 
@@ -68,6 +68,9 @@ Tier 释放条件达成时，链上会把一批 ATOS 注入「ATOX↔ATOS 兑换
         ┌──────────────── 写 ────────────────┐
 页面 ──> 钱包签名 ──> EVM 交易 ──> 预编译 0x…0800 / 0x…0801
         质押、解质押、转委托、领取奖励
+
+        ┌─────────────── Cosmos 模式（可选） ───────────────┐
+页面 ──> Cosmos 钱包签名广播 ──> MsgDelegate 等原生消息
 ```
 
 **为什么写不能走 REST**：质押是 Cosmos 消息（`MsgDelegate`），MetaMask 这类
@@ -77,13 +80,18 @@ Tier 释放条件达成时，链上会把一批 ATOS 注入「ATOX↔ATOS 兑换
 （`atoshid q evm params` 里的 `active_static_precompiles` 能看到），于是质押
 变成一笔往 `0x…0800` 的普通合约调用，任何 EVM 钱包都能签。
 
+当钱包注入 `window.atoshiCosmos`、`window.cosmos` 或兼容的 `window.keplr`，并提供
+`signAndBroadcast` / `sendCosmosTransaction` 时，Atoshi 侧写操作自动使用 Cosmos
+原生消息。未提供时继续使用上面的 EVM 预编译路径。Cosmos 返回的交易哈希通过
+Cosmos REST 查询最终执行结果，不能交给 EVM JSON-RPC 查询。
+
 | UI 操作 | 合约调用 |
 |---|---|
 | 质押 | `0x…0800` `delegate(delegator, "atoshivaloper1…", amount)` |
 | 解质押 | `0x…0800` `undelegate(...)` → 返回完成时间 |
 | 转委托 | `0x…0800` `redelegate(delegator, src, dst, amount)` |
 | 领取（单个） | `0x…0801` `withdrawDelegatorRewards(delegator, validator)` |
-| 领取（全部） | `0x…0801` `claimRewards(delegator, maxRetrieve)` |
+| 领取（全部） | `0x…0801` `claimRewards(delegator, maxRetrieve)`；Cosmos 为多条 `MsgWithdrawDelegatorReward` |
 
 `claimRewards` 一笔交易领全部。Cosmos 那边没有对应的单条消息（得为每个验证人
 各发一条 `MsgWithdrawDelegatorReward`），预编译这里合成了一个。
